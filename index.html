@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手銲股訂飲料</title>
+    <!-- 載入外部 CSS 樣式表 -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app-container">
+    <div class="header" id="appHeader">🥤 手銲股訂飲料</div>
+    <div class="content">
+        <!-- 首頁目錄 -->
+        <div id="page-directory" class="page active">
+            <div id="directoryLoading" style="text-align: center; padding: 20px; color: #555;">正在與試算表連線中... ⏳</div>
+            <h3 id="directoryTitle" style="text-align: center; color: #555; margin-top: 0; display: none;">今日開放訂購店家</h3>
+            <div id="shopDirectoryContainer" style="display: none;"></div>
+            <button class="btn btn-sheet" onclick="loadSummary()">📊 查看目前訂單</button>
+        </div>
+
+        <!-- 菜單頁面 -->
+        <div id="page-menu" class="page">
+            <div style="margin-bottom: 15px;">
+                <button id="aiMainBtn" class="btn" style="background-color: #8E44AD; margin-top: 0;" onclick="toggleAiPanel()">✨ 選擇障礙？請 AI 幫你挑</button>
+                
+                <div id="aiPanel" style="display: none; background: white; padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                    <div style="font-weight: bold; color: #555; margin-bottom: 10px; font-size: 18px;">請選擇你今天想喝的方向：</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #E74C3C; margin-top:0;" onclick="getAiRecommendation('招牌')">🏆 該店招牌</button>
+                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #2ECC71; margin-top:0;" onclick="getAiRecommendation('純茶')">🍃 喝純茶</button>
+                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #F39C12; margin-top:0;" onclick="getAiRecommendation('奶類')">🥛 濃郁奶類</button>
+                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #3498DB; margin-top:0;" onclick="getAiRecommendation('新鮮')">🍋 喝點新鮮</button>
+                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #D35400; margin-top:0;" onclick="getAiRecommendation('熱飲')">☕ 喝暖的</button>
+                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #34495E; margin-top:0;" onclick="getAiRecommendation('內行')">🕵️ 內行喝法</button>
+                    </div>
+                    <div id="aiRecommendationResult" style="display:none; background: #F5EEF8; padding: 15px; border-radius: 8px; margin-top: 15px; border-left: 5px solid #8E44AD; font-size: 14px; line-height: 1.5;"></div>
+                </div>
+            </div>
+
+            <div id="menuContainer"></div>
+            <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
+        </div>
+
+        <!-- 點餐頁面 -->
+        <div id="page-order" class="page">
+            <div class="order-card">
+                <div class="drink-name-display" id="selectedDrinkName">飲品名稱</div>
+                <div class="drink-price-display" id="selectedDrinkPrice">價目表</div>
+                <div class="form-group">
+                    <label>訂購人姓名：</label>
+                    <select id="userName"><option value="" disabled selected>載入中...</option></select>
+                </div>
+                <div class="form-group">
+                    <label>容量與金額：</label>
+                    <select id="userSize" onchange="updateToppingList(); updateQuotaInfo();"></select>
+                </div>
+                <div class="form-group">
+                    <label>甜度：</label>
+                    <select id="userSugar">
+                        <option value="正常糖">正常糖</option>
+                        <option value="八分糖">八分糖</option>
+                        <option value="半糖">半糖</option>
+                        <option value="三分糖" selected>三分糖 (微糖)</option>
+                        <option value="一分糖">一分糖</option>
+                        <option value="無糖">無糖</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>冰塊：</label>
+                    <select id="userIce">
+                        <option value="正常冰">正常冰</option>
+                        <option value="少冰">少冰</option>
+                        <option value="微冰" selected>微冰</option>
+                        <option value="去冰">去冰</option>
+                        <option value="溫">溫</option>
+                        <option value="熱">熱</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>配料：</label>
+                    <select id="userTopping" onchange="updateQuotaInfo()"></select>
+                </div>
+                <div id="quotaDisplayArea"></div>
+                <button class="btn btn-submit" id="submitBtn" onclick="submitOrder()">✅ 確認送出訂單</button>
+                <div id="loading" style="display:none; text-align:center;"></div>
+                <button class="btn btn-back" onclick="goToMenu()">🔙 返回菜單</button>
+            </div>
+        </div>
+
+        <!-- 總表頁面 -->
+        <div id="page-summary" class="page">
+            <div id="shopInfoDisplay" class="shop-info-title"></div>
+            <div style="text-align: center;">
+                <button id="toggleViewBtn" class="btn" onclick="toggleTableView()">🔍 切換為「縮小檢視」</button>
+                <button id="toggleSortBtn" class="btn" onclick="toggleSortView()">📑 依品項排序</button>
+            </div>
+            <div id="summaryLoading">讀取中... ⏳</div>
+            <div class="summary-table-wrapper" id="summaryTableWrapper" style="display: none;"></div>
+            <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
+        </div>
+    </div>
+</div>
+
+<!-- 依序載入資料庫與邏輯檔案 -->
+<script src="shops.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
