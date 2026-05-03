@@ -15,9 +15,22 @@
         <!-- 首頁目錄 -->
         <div id="page-directory" class="page active">
             <div id="directoryLoading" style="text-align: center; padding: 20px; color: #555;">正在與試算表連線中... ⏳</div>
+            
             <h3 id="directoryTitle" style="text-align: center; color: #555; margin-top: 0; display: none;">今日開放訂購店家</h3>
-            <div id="shopDirectoryContainer" style="display: none;"></div>
-            <button class="btn btn-sheet" onclick="loadSummary()">📊 查看目前訂單</button>
+            
+            <!-- 開放的店家 (置中顯示) -->
+            <div id="openShopContainer" style="display: none; justify-content: center; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;"></div>
+
+            <!-- 分隔線與未開放提示 -->
+            <div id="closedShopDivider" style="display: none; text-align: center; margin: 20px 0;">
+                <hr style="border: 0; border-top: 1px dashed #ccc; margin-bottom: 10px;">
+                <span style="color: #999; font-size: 14px;">以下為未開放店家</span>
+            </div>
+
+            <!-- 未開放的店家 (可以加個半透明效果做區別) -->
+            <div id="closedShopContainer" style="display: none; justify-content: center; flex-wrap: wrap; gap: 10px; opacity: 0.6;"></div>
+
+            <button class="btn btn-sheet" style="margin-top: 20px;" onclick="loadSummary()">📊 查看目前訂單</button>
         </div>
 
         <!-- 菜單頁面 -->
