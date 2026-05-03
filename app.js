@@ -117,23 +117,48 @@ function updateQuotaInfo() {
 function renderDirectory() {
     document.getElementById("directoryLoading").style.display = "none";
     document.getElementById("directoryTitle").style.display = "block";
-    const dirContainer = document.getElementById("shopDirectoryContainer");
-    dirContainer.style.display = "grid"; dirContainer.innerHTML = "";
+    
+    // 取得剛才在 HTML 新增的容器與分隔線
+    const openContainer = document.getElementById("openShopContainer");
+    const closedContainer = document.getElementById("closedShopContainer");
+    const closedDivider = document.getElementById("closedShopDivider");
+    
+    // 清空舊內容
+    openContainer.innerHTML = "";
+    closedContainer.innerHTML = "";
+    
+    let hasClosedShops = false;
     
     for (const shopName in allShopsDatabase) {
-        const btn = document.createElement("button"); btn.className = "shop-btn";
+        const btn = document.createElement("button"); 
+        btn.className = "shop-btn"; // 保持你原本的按鈕樣式
         
         if (shopName === activeShop) {
+            // 開放的店家放進 openContainer
             btn.style.color = allShopsDatabase[shopName].color;
             btn.style.borderColor = allShopsDatabase[shopName].color;
             btn.innerText = shopName;
             btn.onclick = () => loadShopMenu(shopName);
-            dirContainer.prepend(btn); 
+            openContainer.appendChild(btn); 
         } else { 
+            // 未開放的店家放進 closedContainer
             btn.classList.add("disabled"); 
             btn.innerText = shopName + " (未開放)"; 
-            dirContainer.appendChild(btn); 
+            closedContainer.appendChild(btn); 
+            hasClosedShops = true;
         }
+    }
+
+    // 顯示開放店家容器
+    openContainer.style.display = "flex";
+    
+    // 判斷是否有未開放店家，來決定是否顯示分隔線與未開放區塊
+    if (hasClosedShops) {
+        closedDivider.style.display = "block";
+        closedContainer.style.display = "flex";
+    } else {
+        closedDivider.style.display = "none";
+        closedContainer.style.display = "none";
     }
 }
 
