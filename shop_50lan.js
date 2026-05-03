@@ -1,6 +1,4 @@
-const allShopsDatabase = {};
-
-// 註冊「50嵐」
+// 註冊「50嵐」的專屬菜單資料
 allShopsDatabase["50嵐"] = {
     color: "#00479D", 
     menu: {
@@ -68,5 +66,3 @@ allShopsDatabase["50嵐"] = {
         {name: "燕麥", price: 0}
     ]
 };
-
-// ⚠️ 請在這裡繼續貼上 allShopsDatabase["麻古茶坊"] = { ... }; 等其他店家的資料
