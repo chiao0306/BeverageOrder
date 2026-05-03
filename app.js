@@ -143,7 +143,7 @@ function renderDirectory() {
         } else { 
             // 未開放的店家放進 closedContainer
             btn.classList.add("disabled"); 
-            btn.innerText = shopName + " (未開放)"; 
+            btn.innerText = shopName; // 這裡已經把 (未開放) 拿掉了
             closedContainer.appendChild(btn); 
             hasClosedShops = true;
         }
