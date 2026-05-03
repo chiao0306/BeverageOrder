@@ -104,7 +104,18 @@
 </div>
 
 <!-- 依序載入資料庫與邏輯檔案 -->
-<script src="shops.js"></script>
+<!-- 1. 先宣告一個全域的空資料庫物件 -->
+<script>
+    const allShopsDatabase = {};
+</script>
+
+<!-- 2. 分別載入各家店的獨立檔案 (檔名你可以自己取，這裡示範幾家) -->
+<script src="shop_50lan.js"></script>
+<script src="shop_macu.js"></script>
+<script src="shop_milkshop.js"></script>
+<!-- 如果有其他店家，就繼續在這裡往下加 -->
+
+<!-- 3. 最後載入主程式邏輯 (負責操作這些資料) -->
 <script src="app.js"></script>
 
 </body>
