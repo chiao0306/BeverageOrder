@@ -1,5 +1,15 @@
 // 你的 GAS 網址已經填入
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx7M-noe6BwZheMiaHBCbgt8oyBnd_YH17xA3Dwb0L98HgV9f96Z-8nOKW0ubxDek6q/exec";
+// 用於將特殊字元轉換為安全格式（防止 XSS 攻擊）
+
+function escapeHtml(unsafe) {
+    return (unsafe || "").toString()
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+}
 
 // ==========================================
 // 1. 與後端溝通的共用函數
@@ -260,14 +270,28 @@ function renderSummaryTable(data) {
 function drawTable(data) {
     const wrapper = document.getElementById("summaryTableWrapper");
     wrapper.style.display = "block";
-    if (!data || data.length === 0) { wrapper.innerHTML = "目前沒資料"; return; }
+    
+    if (!data || data.length === 0) { 
+        wrapper.innerHTML = "目前沒資料"; 
+        return; 
+    }
+    
     let html = "<table><thead><tr>";
-    data[0].forEach(h => html += `<th>${h}</th>`);
+    
+    // 🛡️ 防護 1：連表頭（通常是試算表第一列）也送進 escapeHtml 進行消毒
+    data[0].forEach(h => html += `<th>${escapeHtml(h)}</th>`);
     html += "</tr></thead><tbody>";
+    
     for (let i = 1; i < data.length; i++) {
         if (data[i].join("").trim() === "") continue;
         html += "<tr>";
-        data[i].forEach(cell => html += `<td>${cell || "-"}</td>`);
+        
+        // 🛡️ 防護 2：將每一格的內容先通過 escapeHtml 檢查，如果是空的則補上 "-"
+        data[i].forEach(cell => {
+            let safeText = escapeHtml(cell || "-");
+            html += `<td>${safeText}</td>`;
+        });
+        
         html += "</tr>";
     }
     wrapper.innerHTML = html + "</tbody></table>";
