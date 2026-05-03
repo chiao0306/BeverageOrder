@@ -143,7 +143,10 @@ function renderDirectory() {
         } else { 
             // 未開放的店家放進 closedContainer
             btn.classList.add("disabled"); 
-            btn.innerText = shopName; // 這裡已經把 (未開放) 拿掉了
+            btn.innerText = shopName; // 已經把 (未開放) 拿掉
+            // 讓未開放按鈕寬度填滿自己所在的欄位，看起來會更整齊
+            btn.style.width = "100%"; 
+            btn.style.margin = "0"; 
             closedContainer.appendChild(btn); 
             hasClosedShops = true;
         }
@@ -155,7 +158,10 @@ function renderDirectory() {
     // 判斷是否有未開放店家，來決定是否顯示分隔線與未開放區塊
     if (hasClosedShops) {
         closedDivider.style.display = "block";
-        closedContainer.style.display = "flex";
+        // 把未開放區塊的排版改為 Grid (網格)，並設定為兩欄
+        closedContainer.style.display = "grid";
+        closedContainer.style.gridTemplateColumns = "1fr 1fr"; 
+        closedContainer.style.gap = "10px"; // 按鈕之間的間距
     } else {
         closedDivider.style.display = "none";
         closedContainer.style.display = "none";
