@@ -168,6 +168,9 @@ function renderDirectory() {
     }
 }
 
+// ==========================================
+// 替換這段：載入店家菜單的函數
+// ==========================================
 function loadShopMenu(shopName) {
     currentShopName = shopName;
     const shopData = allShopsDatabase[shopName];
@@ -178,12 +181,21 @@ function loadShopMenu(shopName) {
     menuContainer.innerHTML = "";
     for (const [category, drinks] of Object.entries(shopData.menu)) {
         const titleDiv = document.createElement("div"); titleDiv.className = "category-title";
-        titleDiv.style.borderLeftColor = shopData.color; titleDiv.innerText = category;
+        titleDiv.style.borderLeftColor = shopData.color; 
+        
+        // ✨ 魔法 1：讓「分類標題」的括號自動換行並變小
+        titleDiv.innerHTML = category.replace(/ \((.*?)\)/, '<br><span style="font-size: 14px; font-weight: normal; color: #888;">($1)</span>');
+        
         menuContainer.appendChild(titleDiv);
         const gridDiv = document.createElement("div"); gridDiv.className = "drink-grid";
         drinks.forEach(drink => {
-            const btn = document.createElement("button"); btn.innerText = drink.name; btn.className = "drink-btn";
-            btn.onclick = () => selectDrink(drink); gridDiv.appendChild(btn);
+            const btn = document.createElement("button"); btn.className = "drink-btn";
+            
+            // ✨ 魔法 2：讓「飲料按鈕」的括號自動換行並變小
+            btn.innerHTML = drink.name.replace(/ \((.*?)\)/, '<br><span style="font-size: 14px; font-weight: normal; color: #757575;">($1)</span>');
+            
+            btn.onclick = () => selectDrink(drink); 
+            gridDiv.appendChild(btn);
         });
         menuContainer.appendChild(gridDiv);
     }
@@ -211,11 +223,15 @@ function loadShopMenu(shopName) {
     showPage("page-menu");
 }
 
+// ==========================================
+// 替換這段：點擊飲料進入點餐畫面的函數
+// ==========================================
 function selectDrink(drinkObj) {
     currentDrinkObj = drinkObj;
     const shopData = allShopsDatabase[currentShopName];
     
-    document.getElementById("selectedDrinkName").innerText = drinkObj.name;
+    // ✨ 魔法 3：點進去之後，最上面的飲料名稱也套用漂亮的換行排版
+    document.getElementById("selectedDrinkName").innerHTML = drinkObj.name.replace(/ \((.*?)\)/, '<br><span style="font-size: 16px; font-weight: normal; color: #757575;">($1)</span>');
     document.getElementById("selectedDrinkName").style.color = shopData.color;
     
     const sizeSelect = document.getElementById("userSize"); 
