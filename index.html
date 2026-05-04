@@ -25,21 +25,7 @@
             <div id="closedShopDivider" style="display: none; text-align: center; margin: 20px 0;">
                 <hr style="border: 0; border-top: 1px dashed #ccc; margin-bottom: 10px;">
                 <span style="color: #999; font-size: 14px;">以下為未開放店家</span>
-            
-                    <!-- 💡 這裡加上訂單確認彈窗 (預設隱藏) -->
-        <div id="confirmModal" class="modal-overlay" style="display: none;">
-            <div class="modal-content">
-                <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px;">📝 請確認您的訂單</h3>
-                <div id="confirmOrderDetails" style="text-align: left; line-height: 1.8; font-size: 16px; margin-bottom: 20px; color: #444;">
-                    <!-- 這裡的內容會由 JS 自動填入 -->
-                </div>
-                <div style="display: flex; gap: 10px;">
-                    <button class="btn btn-back" style="flex: 1;" onclick="closeConfirmModal()">🔙 重選</button>
-                    <button class="btn btn-submit" style="flex: 1; background-color: #27AE60;" id="finalSubmitBtn" onclick="executeSubmitOrder()">✅ 確認訂購</button>
-                </div>
             </div>
-        </div>
-    </div>
 
             <!-- 未開放的店家 (可以加個半透明效果做區別) -->
             <div id="closedShopContainer" style="display: none; justify-content: center; flex-wrap: wrap; gap: 10px; opacity: 0.6;"></div>
@@ -110,6 +96,8 @@
                     <select id="userTopping" onchange="updateQuotaInfo()"></select>
                 </div>
                 <div id="quotaDisplayArea"></div>
+                
+                <!-- 這裡呼叫的是修改後的 submitOrder()，負責叫出彈窗 -->
                 <button class="btn btn-submit" id="submitBtn" onclick="submitOrder()">✅ 確認送出訂單</button>
                 <div id="loading" style="display:none; text-align:center;"></div>
                 <button class="btn btn-back" onclick="goToMenu()">🔙 返回菜單</button>
@@ -127,8 +115,24 @@
             <div class="summary-table-wrapper" id="summaryTableWrapper" style="display: none;"></div>
             <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
         </div>
+        
+    </div> <!-- 🌟 關鍵點：<div class="content"> 的結尾在這裡！ -->
+
+    <!-- 💡 訂單確認彈窗 (獨立於所有頁面之外，放在這裡最完美) -->
+    <div id="confirmModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px;">📝 請確認您的訂單</h3>
+            <div id="confirmOrderDetails" style="text-align: left; line-height: 1.8; font-size: 16px; margin-bottom: 20px; color: #444;">
+                <!-- 這裡的內容會由 JS 自動填入 -->
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-back" style="flex: 1;" onclick="closeConfirmModal()">🔙 重選</button>
+                <button class="btn btn-submit" style="flex: 1; background-color: #27AE60;" id="finalSubmitBtn" onclick="executeSubmitOrder()">✅ 確認訂購</button>
+            </div>
+        </div>
     </div>
-</div>
+
+</div> <!-- 最外層 <div class="app-container"> 的結尾 -->
 
 <!-- 依序載入資料庫與邏輯檔案 -->
 <!-- 1. 先宣告一個全域的空資料庫物件 -->
@@ -136,7 +140,7 @@
     const allShopsDatabase = {};
 </script>
 
-<!-- 2. 分別載入各家店的獨立檔案 (檔名你可以自己取，這裡示範幾家) -->
+<!-- 2. 分別載入各家店的獨立檔案 -->
 <script src="menu/shop_50lan.js?v=2026050401"></script>
 <script src="menu/shop_8.js?v=2026050401"></script>
 <script src="menu/shop_macu.js?v=2026050401"></script>
@@ -149,9 +153,7 @@
 <script src="menu/shop_unocha.js?v=2026050401"></script>
 <script src="menu/shop_nanafru.js?v=2026050401"></script> 
 
-<!-- 如果有其他店家，就繼續在這裡往下加 -->
-
-<!-- 3. 最後載入主程式邏輯 (負責操作這些資料) -->
+<!-- 3. 最後載入主程式邏輯 -->
 <script src="app.js?v=2026050401"></script>
 
 </body>
