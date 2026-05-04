@@ -253,7 +253,16 @@ function selectDrink(drinkObj) {
 // ==========================================
 // 5. 送出訂單與查看總表 (透過 API)
 // ==========================================
-async function submitOrder() {
+// 在 app.js 的最上方 (變數宣告區)，多加上這兩個用來暫存訂單的變數：
+let pendingOrderData = null;
+let pendingAlertMsg = "";
+
+// ==========================================
+// 替換區：全新的送出邏輯 (分成攔截、關閉、確定傳送三步驟)
+// ==========================================
+
+// 1. 攔截訂單，顯示確認小視窗
+function submitOrder() {
     const name = document.getElementById("userName").value;
     if (!name) { alert("請選擇名字！"); return; }
     
@@ -264,29 +273,60 @@ async function submitOrder() {
     const totalPrice = drinkPrice + toppingPrice;
     
     let diff = quotaValue > 0 ? Math.max(0, totalPrice - quotaValue) : 0;
-    let alertMsg = "🎉 訂單送出成功！";
-    if (diff > 0) alertMsg += `\n\n(${totalPrice})-(${quotaValue})=(${diff})\n記得補上 ${diff} 元至股務基金，感謝!`;
+    
+    // 暫存成功後的提示訊息
+    pendingAlertMsg = "🎉 訂單送出成功！";
+    if (diff > 0) pendingAlertMsg += `\n\n(${totalPrice})-(${quotaValue})=(${diff})\n記得補上 ${diff} 元至股務基金，感謝!`;
 
-    const orderData = { 
+    // 暫存要送給 GAS 的訂單資料
+    pendingOrderData = { 
         name: name, drink: currentDrinkObj.name, size: sizeSelect.value, 
         sugar: document.getElementById("userSugar").value, ice: document.getElementById("userIce").value, 
         topping: toppingSelect.value, totalPrice: totalPrice, diff: diff > 0 ? diff : "" 
     };
+
+    // 漂亮地排版確認畫面的內容
+    const detailsHtml = `
+        👤 <b>訂購人：</b> ${pendingOrderData.name}<br>
+        🥤 <b>飲品：</b> ${pendingOrderData.drink}<br>
+        📏 <b>容量：</b> ${pendingOrderData.size}<br>
+        🍬 <b>甜度：</b> ${pendingOrderData.sugar}<br>
+        🧊 <b>冰塊：</b> ${pendingOrderData.ice}<br>
+        🍯 <b>配料：</b> ${pendingOrderData.topping}<br>
+        <hr style="border: 0; border-top: 1px dashed #ccc; margin: 10px 0;">
+        💰 <b>總金額：</b> $${pendingOrderData.totalPrice}<br>
+        ${diff > 0 ? `<span style="color: #E74C3C; font-weight: bold;">⚠️ 需補差額：$${diff}</span>` : `<span style="color: #27AE60; font-weight: bold;">✅ 無須補差額</span>`}
+    `;
     
-    const submitBtn = document.getElementById("submitBtn");
-    submitBtn.disabled = true;
-    submitBtn.innerText = "⏳ 訂單傳送中...";
+    // 把文字塞進去，並把隱藏的彈窗叫出來
+    document.getElementById("confirmOrderDetails").innerHTML = detailsHtml;
+    document.getElementById("confirmModal").style.display = "flex";
+}
+
+// 2. 按下「重選」時，關閉視窗
+function closeConfirmModal() {
+    document.getElementById("confirmModal").style.display = "none";
+}
+
+// 3. 按下「確認訂購」時，真正呼叫 API 送出資料
+async function executeSubmitOrder() {
+    if (!pendingOrderData) return;
+
+    const finalSubmitBtn = document.getElementById("finalSubmitBtn");
+    finalSubmitBtn.disabled = true;
+    finalSubmitBtn.innerText = "⏳ 傳送中...";
     
     try {
-        await apiPost('addOrder', { orderData: orderData });
-        alert(alertMsg); 
-        submitBtn.disabled = false;
-        submitBtn.innerText = "✅ 確認送出訂單";
-        goToDirectory();
+        await apiPost('addOrder', { orderData: pendingOrderData });
+        alert(pendingAlertMsg); 
+        closeConfirmModal(); // 傳送成功後關閉視窗
+        finalSubmitBtn.disabled = false;
+        finalSubmitBtn.innerText = "✅ 確認訂購";
+        goToDirectory(); // 回到首頁
     } catch(e) {
         alert("傳送失敗：" + e.message);
-        submitBtn.disabled = false;
-        submitBtn.innerText = "✅ 確認送出訂單";
+        finalSubmitBtn.disabled = false;
+        finalSubmitBtn.innerText = "✅ 確認訂購";
     }
 }
 
