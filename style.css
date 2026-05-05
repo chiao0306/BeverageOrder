@@ -57,3 +57,50 @@ select, input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radiu
     from { transform: scale(0.8); opacity: 0; }
     to { transform: scale(1); opacity: 1; }
 }
+
+/* ==========================================
+   訂單確認彈窗：字體放大與醒目化
+   ========================================== */
+#confirmOrderDetails {
+    text-align: left;
+    line-height: 2;      /* 增加行高，讓每一行不會太擠 */
+    font-size: 18px;     /* 基礎字體從 16px 放大到 18px */
+    color: #222;         /* 字體顏色加深，提高對比度 */
+    margin-bottom: 20px;
+    padding: 0 10px;
+}
+
+#confirmOrderDetails b {
+    color: #555;         /* 標題稍微淡一點，凸顯右側的使用者選擇 */
+    margin-right: 5px;
+}
+
+/* 總金額特別放大 */
+.modal-total-price {
+    font-size: 22px;     
+    margin-top: 10px;
+}
+
+/* 差額提示框設計 */
+.modal-diff-price {
+    font-size: 20px;     /* 差額字體放大 */
+    display: inline-block;
+    margin-top: 10px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-weight: bold;
+}
+
+/* 需補差額的危險色系 (紅底紅字) */
+.diff-danger { 
+    background-color: #FDEDEC; 
+    color: #E74C3C; 
+    border: 1px solid #F5B7B1; 
+}
+
+/* 無須補差額的安全色系 (綠底綠字) */
+.diff-safe { 
+    background-color: #EAFAF1; 
+    color: #27AE60; 
+    border: 1px solid #A9DFBF; 
+}
