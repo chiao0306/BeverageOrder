@@ -382,7 +382,14 @@ function drawTable(data) {
         html += "</tr>";
     }
     wrapper.innerHTML = html + "</tbody></table>";
+    
+    // 👇 補上這段：強制同步縮小狀態
+    if (isCompactView) {
+        isCompactView = false; // 先假裝退回 false
+        toggleTableView();     // 呼叫切換函數，它會自動變回 true，幫表格穿上縮小衣服，並改好按鈕文字！
+    }
 }
+
 
 function toggleSortView() {
     if (!originalSummaryData || originalSummaryData.length <= 2) return; 
