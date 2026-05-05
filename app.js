@@ -36,7 +36,7 @@ async function apiPost(action, payload) {
 // 2. 全域變數
 // ==========================================
 let activeShop = ""; let shopTitle = ""; let quotaLabel = ""; let quotaValue = 0;
-let currentShopName = ""; let currentDrinkObj = null; let isCompactView = false;
+let currentShopName = ""; let currentDrinkObj = null; let isCompactView = true;
 let originalSummaryData = []; let isSortedByItem = false;
 
 // ==========================================
