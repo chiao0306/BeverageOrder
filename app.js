@@ -293,9 +293,11 @@ function submitOrder() {
         🍬 <b>甜度：</b> ${pendingOrderData.sugar}<br>
         🧊 <b>冰塊：</b> ${pendingOrderData.ice}<br>
         🍯 <b>配料：</b> ${pendingOrderData.topping}<br>
-        <hr style="border: 0; border-top: 1px dashed #ccc; margin: 10px 0;">
-        💰 <b>總金額：</b> $${pendingOrderData.totalPrice}<br>
-        ${diff > 0 ? `<span style="color: #E74C3C; font-weight: bold;">⚠️ 需補差額：$${diff}</span>` : `<span style="color: #27AE60; font-weight: bold;">✅ 無須補差額</span>`}
+        <hr style="border: 0; border-top: 1px dashed #ccc; margin: 15px 0;">
+        <div class="modal-total-price">💰 <b>總金額：</b> $${pendingOrderData.totalPrice}</div>
+        ${diff > 0 
+            ? `<div class="modal-diff-price diff-danger">⚠️ 需補差額：$${diff}</div>` 
+            : `<div class="modal-diff-price diff-safe">✅ 無須補差額</div>`}
     `;
     
     // 把文字塞進去，並把隱藏的彈窗叫出來
