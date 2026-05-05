@@ -436,7 +436,16 @@ function showPage(id) {
 }
 function goToDirectory() { showPage("page-directory"); document.getElementById("appHeader").innerText = "手銲股訂飲料"; document.getElementById("appHeader").style.background = "#333"; }
 function goToMenu() { showPage("page-menu"); }
-function toggleTableView() { isCompactView = !isCompactView; document.getElementById("summaryTableWrapper").classList.toggle("compact-view"); updateToggleButtonText(); }
+function toggleTableView() { 
+    isCompactView = !isCompactView; 
+    const wrapperElement = document.getElementById("summaryTableWrapper");
+    if (isCompactView) {
+        wrapperElement.classList.add("compact-view");
+    } else {
+        wrapperElement.classList.remove("compact-view");
+    }
+    updateToggleButtonText(); 
+}
 function updateToggleButtonText() { document.getElementById("toggleViewBtn").innerText = isCompactView ? "↔️ 放大檢視" : "🔍 縮小檢視"; }
 function toggleAiPanel() {
     const panel = document.getElementById("aiPanel");
