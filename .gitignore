@@ -2,4 +2,7 @@
 
 .env
 
-code.gs
+.code.gs
+
+__pycache__/
+*.py[cod]
