@@ -92,7 +92,7 @@ def do_get():
         else:
             result["error"] = f"未知的 GET 請求: {action}"
     except Exception as e:
-        result["error"] = str(e)
+        result["error"] = f"{type(e).__name__}: {e}"
     return json_response(result)
 
 
@@ -114,7 +114,7 @@ def do_post():
         else:
             result["error"] = f"未知的 POST 請求: {action}"
     except Exception as e:
-        result["error"] = str(e)
+        result["error"] = f"{type(e).__name__}: {e}"
     return json_response(result)
 
 
