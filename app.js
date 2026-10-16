@@ -1,5 +1,5 @@
-// 你的 GAS 網址已經填入
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx7M-noe6BwZheMiaHBCbgt8oyBnd_YH17xA3Dwb0L98HgV9f96Z-8nOKW0ubxDek6q/exec";
+// 後端已改為 Cloud Run，部署後請將此處換成實際服務網址（結尾不要加斜線）
+const GAS_API_URL = "https://beverageorder-1075878684960.asia-east1.run.app";
 // 用於將特殊字元轉換為安全格式（防止 XSS 攻擊）
 
 function escapeHtml(unsafe) {
