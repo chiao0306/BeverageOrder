@@ -11,6 +11,38 @@ body { font-family: '微軟正黑體', sans-serif; background-color: #f7f7f7; ma
 .category-title { background: #f0f0f0; border-left: 5px solid #333; padding: 8px 15px; font-size: 18px; font-weight: bold; margin: 20px 0 10px 0; color: #555; }
 .drink-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .drink-btn { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 15px 10px; text-align: center; cursor: pointer; font-size: 18px; font-weight: bold; }
+.raffle-btn { background: #8E44AD; }
+.drink-btn.raffle-highlight { position: relative; z-index: 1; animation: raffle-flash 0.35s linear infinite; }
+@keyframes raffle-flash {
+    0%, 100% { outline: 4px solid #ff3860; box-shadow: 0 0 18px 6px #ff3860; }
+    25% { outline: 4px solid #ffdd57; box-shadow: 0 0 18px 6px #ffdd57; }
+    50% { outline: 4px solid #23d160; box-shadow: 0 0 18px 6px #23d160; }
+    75% { outline: 4px solid #3273dc; box-shadow: 0 0 18px 6px #3273dc; }
+}
+.raffle-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 24px 16px;
+    background: rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    box-sizing: border-box;
+}
+.raffle-overlay[hidden] { display: none; }
+.raffle-message {
+    max-width: 100%;
+    padding: 12px 18px;
+    border-radius: 24px;
+    background: rgba(40, 40, 40, 0.88);
+    color: white;
+    font-size: 16px;
+    font-weight: bold;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
 .order-card { background: #f9f9f9; padding: 20px; border-radius: 10px; border: 1px solid #eee; margin-top: 20px;}
 .drink-name-display { font-size: 20px; color: #333; text-align: center; font-weight: bold;}
 .drink-price-display { font-size: 14px; color: #757575; text-align: center; margin-bottom: 20px; border-bottom: 2px dashed #ccc; padding-bottom: 15px;}

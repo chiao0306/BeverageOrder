@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手銲股訂飲料</title>
     <!-- 載入外部 CSS 樣式表 -->
-    <link rel="stylesheet" href="style.css?v=2026050504">
+    <link rel="stylesheet" href="style.css?v=2026101701">
 </head>
 <body>
 
@@ -36,24 +36,14 @@
         <!-- 菜單頁面 -->
         <div id="page-menu" class="page">
             <div style="margin-bottom: 15px;">
-                <button id="aiMainBtn" class="btn" style="background-color: #8E44AD; margin-top: 0;" onclick="toggleAiPanel()">✨ 點進來請 AI 幫你介紹</button>
-                
-                <div id="aiPanel" style="display: none; background: white; padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                    <div style="font-weight: bold; color: #555; margin-bottom: 10px; font-size: 18px;">請選擇你今天想喝的方向：</div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #E74C3C; margin-top:0;" onclick="getAiRecommendation('招牌')">🏆 該店招牌</button>
-                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #2ECC71; margin-top:0;" onclick="getAiRecommendation('純茶')">🍃 喝純茶</button>
-                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #F39C12; margin-top:0;" onclick="getAiRecommendation('奶類')">🥛 濃郁奶類</button>
-                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #3498DB; margin-top:0;" onclick="getAiRecommendation('新鮮')">🍋 喝點新鮮</button>
-                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #D35400; margin-top:0;" onclick="getAiRecommendation('熱飲')">☕ 喝暖的</button>
-                        <button class="btn" style="padding: 8px; font-size: 16px; background-color: #34495E; margin-top:0;" onclick="getAiRecommendation('內行')">🕵️ 內行喝法</button>
-                    </div>
-                    <div id="aiRecommendationResult" style="display:none; background: #F5EEF8; padding: 15px; border-radius: 8px; margin-top: 15px; border-left: 5px solid #8E44AD; font-size: 14px; line-height: 1.5;"></div>
-                </div>
+                <button id="raffleBtn" class="btn raffle-btn" style="margin-top: 0;" onclick="startDrinkRaffle()">🎲 幫我抽一杯</button>
             </div>
 
             <div id="menuContainer"></div>
             <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
+            <div id="raffleOverlay" class="raffle-overlay" hidden onclick="stopDrinkRaffle()">
+                <div id="raffleMessage" class="raffle-message">🎲 正在抽籤…</div>
+            </div>
         </div>
 
         <!-- 點餐頁面 -->
@@ -153,7 +143,7 @@
 <script src="menu/shop_nanafru.js?v=2026050504"></script> 
 
 <!-- 3. 最後載入主程式邏輯 -->
-<script src="app.js?v=2026050504"></script>
+<script src="app.js?v=2026101701"></script>
 
 </body>
 </html>
