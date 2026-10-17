@@ -291,7 +291,6 @@ function selectDrink(drinkObj) {
 // ==========================================
 // 在 app.js 的最上方 (變數宣告區)，多加上這兩個用來暫存訂單的變數：
 let pendingOrderData = null;
-let pendingAlertMsg = "";
 
 // ==========================================
 // 替換區：全新的送出邏輯 (分成攔截、關閉、確定傳送三步驟)
@@ -310,10 +309,6 @@ function submitOrder() {
     
     let diff = quotaValue > 0 ? Math.max(0, totalPrice - quotaValue) : 0;
     
-    // 暫存成功後的提示訊息
-    pendingAlertMsg = "🎉 訂單送出成功！";
-    if (diff > 0) pendingAlertMsg += `\n\n(${totalPrice})-(${quotaValue})=(${diff})\n記得補上 ${diff} 元至股務基金，感謝!`;
-
     // 暫存要送給 GAS 的訂單資料
     pendingOrderData = { 
         name: name, drink: currentDrinkObj.name, size: sizeSelect.value, 
@@ -413,16 +408,40 @@ async function doSubmitOrder() {
     const finalSubmitBtn = document.getElementById("finalSubmitBtn");
     try {
         await apiPost('addOrder', { orderData: pendingOrderData });
-        alert(pendingAlertMsg); 
-        closeConfirmModal(); // 傳送成功後關閉視窗
+        showOrderSuccess();
+        closeConfirmModal();
         finalSubmitBtn.disabled = false;
         finalSubmitBtn.innerText = "✅ 確認訂購";
-        goToDirectory(); // 回到首頁
     } catch(e) {
         alert("傳送失敗：" + e.message);
         finalSubmitBtn.disabled = false;
         finalSubmitBtn.innerText = "✅ 確認訂購";
     }
+}
+
+function showOrderSuccess() {
+    const order = pendingOrderData;
+    document.getElementById("successOrderDetails").innerHTML = `
+        👤 <b>訂購人：</b> ${escapeHtml(order.name)}<br>
+        🥤 <b>飲品：</b> ${escapeHtml(order.drink)}<br>
+        📏 <b>容量：</b> ${escapeHtml(order.size)}<br>
+        🍬 <b>甜度：</b> ${escapeHtml(order.sugar)}<br>
+        🧊 <b>冰塊：</b> ${escapeHtml(order.ice)}<br>
+        🍯 <b>配料：</b> ${escapeHtml(order.topping)}<br>
+        <div class="success-total-price">💰 總金額：$${order.totalPrice}</div>
+    `;
+
+    const diffNotice = document.getElementById("successDiffNotice");
+    if (order.diff) {
+        diffNotice.innerText = `⚠️ 請補上 ${order.diff} 元至股務基金，感謝！`;
+        diffNotice.style.display = "block";
+    } else {
+        diffNotice.style.display = "none";
+    }
+
+    showPage("page-success");
+    updateHeaderForPage("page-success");
+    pendingOrderData = null;
 }
 
 async function loadSummary() {
@@ -540,6 +559,9 @@ function updateHeaderForPage(pageId) {
     } else if (pageId === "page-summary") {
         header.innerText = "訂購單總表";
         header.style.background = "#00796B";
+    } else if (pageId === "page-success") {
+        header.innerText = "訂購完成";
+        header.style.background = "#27AE60";
     } else if (pageId === "page-menu" || pageId === "page-order") {
         const shopData = allShopsDatabase[currentShopName];
         if (shopData) {
