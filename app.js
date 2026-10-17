@@ -431,13 +431,49 @@ function updateSortButtonText() {
 // ==========================================
 // 6. UI 切換工具
 // ==========================================
-function showPage(id) {
+function showPage(id, updateHistory = true) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(id).classList.add('active');
+    if (updateHistory) {
+        window.history.pushState({ pageId: id }, "", window.location.href);
+    }
     window.scrollTo(0,0);
 }
-function goToDirectory() { showPage("page-directory"); document.getElementById("appHeader").innerText = "手銲股訂飲料"; document.getElementById("appHeader").style.background = "#333"; }
-function goToMenu() { showPage("page-menu"); }
+function updateHeaderForPage(pageId) {
+    const header = document.getElementById("appHeader");
+    if (pageId === "page-directory") {
+        header.innerText = "手銲股訂飲料";
+        header.style.background = "#333";
+    } else if (pageId === "page-summary") {
+        header.innerText = "訂購單總表";
+        header.style.background = "#00796B";
+    } else if (pageId === "page-menu" || pageId === "page-order") {
+        const shopData = allShopsDatabase[currentShopName];
+        if (shopData) {
+            header.innerText = currentShopName;
+            header.style.background = shopData.color;
+        }
+    }
+}
+function goToDirectory() {
+    showPage("page-directory");
+    updateHeaderForPage("page-directory");
+}
+function goToMenu() {
+    if (window.history.state?.pageId === "page-order") {
+        window.history.back();
+    } else {
+        showPage("page-menu");
+        updateHeaderForPage("page-menu");
+    }
+}
+window.history.replaceState({ ...(window.history.state || {}), pageId: "page-directory" }, "", window.location.href);
+window.addEventListener("popstate", event => {
+    const pageId = event.state?.pageId;
+    if (!pageId || !document.getElementById(pageId)) return;
+    showPage(pageId, false);
+    updateHeaderForPage(pageId);
+});
 function toggleTableView() { 
     isCompactView = !isCompactView; 
     const wrapperElement = document.getElementById("summaryTableWrapper");
