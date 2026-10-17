@@ -231,7 +231,11 @@ function startDrinkRaffle() {
         }
 
         if (selectedButton) selectedButton.classList.remove("raffle-highlight");
-        selectedButton = drinkButtons[Math.floor(Math.random() * drinkButtons.length)];
+        let nextIndex = Math.floor(Math.random() * drinkButtons.length);
+        if (drinkButtons.length > 1 && drinkButtons[nextIndex] === selectedButton) {
+            nextIndex = (nextIndex + 1) % drinkButtons.length;
+        }
+        selectedButton = drinkButtons[nextIndex];
         selectedButton.classList.add("raffle-highlight");
         selectedButton.scrollIntoView({ behavior: "smooth", block: "center" });
 
