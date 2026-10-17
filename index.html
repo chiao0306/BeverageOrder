@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手銲股訂飲料</title>
     <!-- 載入外部 CSS 樣式表 -->
-    <link rel="stylesheet" href="style.css?v=2026101701">
+    <link rel="stylesheet" href="style.css?v=2026101702">
 </head>
 <body>
 
@@ -94,6 +94,18 @@
             </div>
         </div>
 
+        <!-- 訂購成功頁面 -->
+        <div id="page-success" class="page">
+            <div class="success-card">
+                <div class="success-icon">✅</div>
+                <h2>訂購成功！</h2>
+                <p class="success-message">🎉 訂單已成功送出</p>
+                <div id="successOrderDetails" class="success-order-details"></div>
+                <div id="successDiffNotice" class="success-diff-notice" style="display: none;"></div>
+                <button class="btn btn-submit" onclick="goToDirectory()">🏠 回到首頁</button>
+            </div>
+        </div>
+
         <!-- 總表頁面 -->
         <div id="page-summary" class="page">
             <div id="shopInfoDisplay" class="shop-info-title"></div>
@@ -155,7 +167,7 @@
 <script src="menu/shop_nanafru.js?v=2026050504"></script> 
 
 <!-- 3. 最後載入主程式邏輯 -->
-<script src="app.js?v=2026101701"></script>
+<script src="app.js?v=2026101702"></script>
 
 </body>
 </html>
