@@ -38,6 +38,7 @@ async function apiPost(action, payload) {
 let activeShop = ""; let shopTitle = ""; let quotaLabel = ""; let quotaValue = 0;
 let currentShopName = ""; let currentDrinkObj = null; let isCompactView = true;
 let originalSummaryData = []; let isSortedByItem = false;
+let raffleTimeout = null; let isRaffleActive = false;
 
 // ==========================================
 // 3. 網頁載入時啟動
@@ -200,27 +201,58 @@ function loadShopMenu(shopName) {
         menuContainer.appendChild(gridDiv);
     }
 
-    // AI 卡片 UI 處理
-    const aiPanel = document.getElementById("aiPanel");
-    const aiResult = document.getElementById("aiRecommendationResult");
-    const aiMainBtn = document.getElementById("aiMainBtn");
-    
-    if(aiPanel) aiPanel.style.display = "none";
-    if(aiResult) aiResult.style.display = "none";
-    if(aiMainBtn) {
-        aiMainBtn.style.backgroundColor = shopData.color;
-        aiMainBtn.style.color = "#FFF";
-        aiMainBtn.style.border = "none";
-    }
-    if(aiResult) {
-        aiResult.style.borderLeftColor = shopData.color;
-        aiResult.style.background = "#FAFAFA";
-        aiResult.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)";
-        aiResult.style.border = "1px solid #EEE";
-        aiResult.style.borderLeft = `6px solid ${shopData.color}`;
-    }
+    document.getElementById("raffleBtn").style.backgroundColor = shopData.color;
 
     showPage("page-menu");
+}
+
+function startDrinkRaffle() {
+    if (isRaffleActive) return;
+
+    const drinkButtons = Array.from(document.querySelectorAll("#menuContainer .drink-btn"));
+    if (!drinkButtons.length) return;
+
+    isRaffleActive = true;
+    const overlay = document.getElementById("raffleOverlay");
+    const message = document.getElementById("raffleMessage");
+    const duration = 4000;
+    const startTime = performance.now();
+    let selectedButton = null;
+
+    overlay.hidden = false;
+    message.innerText = "🎲 正在抽籤…";
+
+    function jumpToDrink() {
+        const elapsed = performance.now() - startTime;
+        if (elapsed >= duration) {
+            message.innerText = `🎉 抽中「${selectedButton.innerText.replace(/\s+/g, " ").trim()}」！點擊畫面結束閃爍`;
+            raffleTimeout = null;
+            return;
+        }
+
+        if (selectedButton) selectedButton.classList.remove("raffle-highlight");
+        selectedButton = drinkButtons[Math.floor(Math.random() * drinkButtons.length)];
+        selectedButton.classList.add("raffle-highlight");
+        selectedButton.scrollIntoView({ behavior: "smooth", block: "center" });
+
+        const progress = elapsed / duration;
+        const delay = Math.min(55 + progress * progress * 400, duration - elapsed);
+        raffleTimeout = window.setTimeout(jumpToDrink, delay);
+    }
+
+    jumpToDrink();
+}
+
+function stopDrinkRaffle() {
+    if (!isRaffleActive) return;
+
+    window.clearTimeout(raffleTimeout);
+    raffleTimeout = null;
+    isRaffleActive = false;
+    document.querySelectorAll("#menuContainer .raffle-highlight").forEach(button => {
+        button.classList.remove("raffle-highlight");
+    });
+    document.getElementById("raffleOverlay").hidden = true;
 }
 
 // ==========================================
@@ -485,48 +517,3 @@ function toggleTableView() {
     updateToggleButtonText(); 
 }
 function updateToggleButtonText() { document.getElementById("toggleViewBtn").innerText = isCompactView ? "↔️ 放大檢視" : "🔍 縮小檢視"; }
-function toggleAiPanel() {
-    const panel = document.getElementById("aiPanel");
-    panel.style.display = (panel.style.display === "none") ? "block" : "none";
-}
-
-// ==========================================
-// 7. AI 推薦功能 (透過 API)
-// ==========================================
-async function getAiRecommendation(type) {
-    const resultDiv = document.getElementById("aiRecommendationResult");
-    const shopData = allShopsDatabase[currentShopName];
-    
-    resultDiv.style.display = "block";
-    resultDiv.innerHTML = `
-        <div style="font-size: 16px; color: #666; text-align: center; padding: 10px 0;">
-            ⏳ AI 正在為您通盤分析<strong>「${currentShopName}」</strong><br>
-            <span style="font-size: 14px; color: #999;">(請稍候...)</span>
-        </div>
-    `;
-
-    let menuString = "";
-    for (const [category, drinks] of Object.entries(shopData.menu)) {
-        menuString += `【${category}】: ` + drinks.map(d => d.name).join(", ") + "\n";
-    }
-
-    try {
-        const response = await apiPost('getAiRecommendation', {
-            shopName: currentShopName,
-            menuText: menuString,
-            requestType: type
-        });
-        
-        resultDiv.innerHTML = `
-            <div style="font-size: 18px; font-weight: bold; color: ${shopData.color}; margin-bottom: 12px; border-bottom: 2px dashed ${shopData.color}; padding-bottom: 8px;">
-                🤖 飲料達人 AI (${type}推薦)
-            </div>
-            <div style="font-size: 16px; line-height: 1.8; color: #333; letter-spacing: 0.5px;">
-                ${response}
-            </div>
-        `;
-    } catch(e) {
-        resultDiv.innerHTML = `<div style="color: #E74C3C; font-size: 16px; text-align: center; font-weight: bold;">❌ 呼叫 AI 失敗，請稍後再試！</div>`;
-        console.error(e);
-    }
-}
