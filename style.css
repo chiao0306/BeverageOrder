@@ -36,7 +36,7 @@ body { font-family: '微軟正黑體', sans-serif; background-color: #f7f7f7; ma
     max-width: 100%;
     padding: 12px 18px;
     border-radius: 24px;
-    background: rgba(40, 40, 40, 0.5);
+    background: #282828;
     white-space: pre-line;
     line-height: 1.5;
     color: white;
