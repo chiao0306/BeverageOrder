@@ -239,8 +239,8 @@ function startDrinkRaffle() {
         selectedButton.classList.add("raffle-highlight");
         selectedButton.scrollIntoView({ behavior: "smooth", block: "center" });
 
-        const progress = elapsed / duration;
-        const delay = Math.min(55 + progress * progress * 400, duration - elapsed);
+        // 固定每 0.4 秒跳一次，避免切換過快造成眼花
+        const delay = Math.min(400, duration - elapsed);
         raffleTimeout = window.setTimeout(jumpToDrink, delay);
     }
 
