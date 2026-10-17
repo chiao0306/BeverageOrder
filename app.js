@@ -355,6 +355,63 @@ async function executeSubmitOrder() {
     finalSubmitBtn.innerText = "⏳ 傳送中...";
     
     try {
+        // 送出前先查詢試算表，若此人已有訂購飲料，需再次確認是否重新訂購
+        const existing = await findExistingOrder(pendingOrderData.name);
+        if (existing) {
+            showReorderModal(existing);
+            finalSubmitBtn.disabled = false;
+            finalSubmitBtn.innerText = "✅ 確認訂購";
+            return;
+        }
+        await doSubmitOrder();
+    } catch(e) {
+        alert("傳送失敗：" + e.message);
+        finalSubmitBtn.disabled = false;
+        finalSubmitBtn.innerText = "✅ 確認訂購";
+    }
+}
+
+// 在試算表資料中尋找該姓名已訂購的飲料（飲料欄位非空才算已訂購）
+async function findExistingOrder(name) {
+    const data = await apiGet('getOrderData');
+    for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        if ((row[0] || "").toString().trim() === name.trim() && (row[1] || "").toString().trim() !== "") {
+            return row;
+        }
+    }
+    return null;
+}
+
+function showReorderModal(row) {
+    const cell = v => escapeHtml((v === undefined || v === null || v === "") ? "-" : v);
+    document.getElementById("reorderDetails").innerHTML = `
+        <div style="margin-bottom:10px;">你已經訂購過飲料了：</div>
+        🥤 <b>飲品：</b> ${cell(row[1])}<br>
+        📏 <b>容量：</b> ${cell(row[2])}<br>
+        🍬 <b>甜度：</b> ${cell(row[3])}<br>
+        🧊 <b>冰塊：</b> ${cell(row[4])}<br>
+        🍯 <b>配料：</b> ${cell(row[5])}<br>
+        <div style="margin-top:10px;">確定要重新訂購並覆蓋嗎？</div>`;
+    document.getElementById("reorderModal").style.display = "flex";
+}
+
+function closeReorderModal() {
+    document.getElementById("reorderModal").style.display = "none";
+}
+
+async function confirmReorder() {
+    closeReorderModal();
+    const finalSubmitBtn = document.getElementById("finalSubmitBtn");
+    finalSubmitBtn.disabled = true;
+    finalSubmitBtn.innerText = "⏳ 傳送中...";
+    await doSubmitOrder();
+}
+
+// 真正送出訂單
+async function doSubmitOrder() {
+    const finalSubmitBtn = document.getElementById("finalSubmitBtn");
+    try {
         await apiPost('addOrder', { orderData: pendingOrderData });
         alert(pendingAlertMsg); 
         closeConfirmModal(); // 傳送成功後關閉視窗
