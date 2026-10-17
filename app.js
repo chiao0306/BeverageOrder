@@ -220,7 +220,7 @@ function startDrinkRaffle() {
     let selectedButton = null;
 
     overlay.hidden = false;
-    message.innerText = "🎲 正在抽籤…";
+    message.innerText = "🎲 正在抽籤\n4...";
 
     function jumpToDrink() {
         const elapsed = performance.now() - startTime;
@@ -229,6 +229,9 @@ function startDrinkRaffle() {
             raffleTimeout = null;
             return;
         }
+
+        // 同步更新倒數秒數
+        message.innerText = `🎲 正在抽籤\n${Math.ceil((duration - elapsed) / 1000)}...`;
 
         if (selectedButton) selectedButton.classList.remove("raffle-highlight");
         let nextIndex = Math.floor(Math.random() * drinkButtons.length);
