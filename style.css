@@ -24,7 +24,7 @@ body { font-family: '微軟正黑體', sans-serif; background-color: #f7f7f7; ma
     inset: 0;
     z-index: 1100;
     display: flex;
-    align-items: flex-start;
+    align-items: flex-end;
     justify-content: center;
     padding: 24px 16px;
     background: rgba(255, 255, 255, 0.08);
