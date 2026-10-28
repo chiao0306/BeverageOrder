@@ -10,10 +10,23 @@ gcloud services enable run.googleapis.com cloudbuild.googleapis.com sheets.googl
 取得 Cloud Run 使用的服務帳戶 email（預設為 `<專案編號>-compute@developer.gserviceaccount.com`），
 到 Google 試算表按「共用」，將該 email 加為**編輯者**。
 
-## 3. 部署
+## 3. 部署（含 Twilio + Gemini Live API 語音訂飲料設定）
+
+本專案後端 `main.py` 採用 **【路線二：Twilio Programmable Voice + Google Gemini Live API (`gemini-3.8-live`)】** 全自建雙向音訊串流架構：
+- 當電話撥通時，Twilio 會透過 WebSocket (`wss://<你的Cloud-Run網址>/twilio-media-stream/<call_id>`) 將即時電話音訊 (`8kHz μ-law`) 串流至 Cloud Run。
+- `main.py` 內建純 Python 高速音訊轉碼器，即時橋接至 **`gemini-3.8-live`** 進行雙向低延遲對話，並支援**店員插話打斷 (Barge-in)** 與即時逐字稿。
+- 通話結束後，自動呼叫 **`gemini-3.8-flash`** Structured Outputs 擷取「總金額、預計取餐時間、塑膠袋狀態、備註」填回前端。
+
+### 需要的 4 個環境變數：
+1. `GEMINI_API_KEY`：從 [Google AI Studio](https://aistudio.google.com/) 取得。
+2. `TWILIO_ACCOUNT_SID`：從 [Twilio Console 首頁](https://console.twilio.com/) 複製（`AC...` 開頭）。
+3. `TWILIO_AUTH_TOKEN`：從 Twilio Console 首頁複製。
+4. `TWILIO_FROM_NUMBER`：在 Twilio Console 首頁點 **Get a trial phone number** 免費取得的電話號碼（例如 `+1256xxxxxxx`）。
+   *(💡 提示：免費 Trial 帳號可以直接撥打給你註冊 Twilio 時驗證過的那支台灣手機號碼 `+8869xxxxxxxx`，不需升級付費即可先打給自己的手機實測 AI 對話！)*
+
 ```powershell
 gcloud run deploy beverage-order --source . --region asia-east1 --allow-unauthenticated `
-  --set-env-vars "SHEET_URL=<試算表網址>,ALLOWED_ORIGIN=<前端網域或*>"
+  --set-env-vars "SHEET_URL=<試算表網址>,ALLOWED_ORIGIN=*,GEMINI_API_KEY=<Gemini金鑰>,TWILIO_ACCOUNT_SID=<AC開頭SID>,TWILIO_AUTH_TOKEN=<AuthToken>,TWILIO_FROM_NUMBER=<+1開頭Twilio號碼>"
 ```
 `GOOGLE_APPLICATION_CREDENTIALS` 不需設定，Cloud Run 會自動使用服務帳戶身分。
 
@@ -24,37 +37,4 @@ gcloud run deploy beverage-order --source . --region asia-east1 --allow-unauthen
 ```powershell
 .\.venv\Scripts\pip install -r requirements.txt
 .\.venv\Scripts\python main.py
-```
-
-
----
-
-## 5. 設定 AI 電話訂飲料（Vapi.ai + Twilio）
-
-本專案後端 `main.py` 已內建串接 **Vapi.ai + Twilio**，並會自動帶入**台灣繁體中文女聲 (`zh-TW-HsiaoChenNeural`)** 與**手搖飲逐項報單 Prompt**，也會在掛斷電話後自動擷取 `總金額`、`預計取餐時間`、`塑膠袋狀態` 填回前端。
-
-### 步驟 A：準備 Twilio 帳號與發話號碼（約 5 分鐘）
-1. 註冊並登入 [Twilio Console](https://console.twilio.com/)。
-2. 在左側選單取得你的 **Account SID** 與 **Auth Token**。
-3. **取得撥號號碼（二選一）**：
-   - **驗證你自己的台灣手機作為來電顯示（Verified Caller ID）**：到 `Phone Numbers` -> `Manage` -> `Verified Caller IDs`，輸入你的手機（如 `+886912345678`）收簡訊驗證；**並購買一支最便宜的美國號碼（約 $1.15/月）匯入 Vapi 作為外撥通道**。
-   - **重要設定（必勾）**：到 Twilio Console 搜尋 **Voice Geographic Permissions (Geo-Permissions)**，搜尋 **Taiwan (+886)** 並將其打勾啟用（否則 Twilio 預設不允許打給台灣號碼）。
-
-### 步驟 B：在 Vapi.ai 綁定 Twilio 並取得兩把 ID（約 3 分鐘）
-1. 註冊並登入 [Vapi Dashboard](https://dashboard.vapi.ai/)。
-2. 點選左側 **Phone Numbers** -> **Import Twilio**，填入剛才的 Twilio號碼、Account SID 與 Auth Token。
-3. 匯入成功後，複製該號碼頁面上的 **Phone Number ID**（格式類似 `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`）👉 這就是 `VAPI_PHONE_NUMBER_ID`。
-4. 點選左側 **Organization / API Keys**，複製 **Private API Key** 👉 這就是 `VAPI_API_KEY`。
-
-### 步驟 C：設定環境變數（本機 `.env` 或 Cloud Run）
-在 `.env` 加入：
-```env
-VAPI_API_KEY=你的_Vapi_Private_API_Key
-VAPI_PHONE_NUMBER_ID=你的_Vapi_Phone_Number_ID
-```
-
-重新部署至 Cloud Run 時加上這兩個環境變數：
-```powershell
-gcloud run deploy beverage-order --source . --region asia-east1 --allow-unauthenticated `
-  --set-env-vars "SHEET_URL=<試算表網址>,ALLOWED_ORIGIN=*,VAPI_API_KEY=<VAPI私鑰>,VAPI_PHONE_NUMBER_ID=<VAPI電話ID>"
 ```

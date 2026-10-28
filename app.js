@@ -940,7 +940,7 @@ async function startAiPhoneCall() {
 
     try {
         const res = await apiPost("startAiPhoneCall", { callData: payload });
-        statusBox.innerHTML = `✅ 後端已透過 Vapi + Twilio 發起撥號！<br>🆔 通話 ID：<code>${escapeHtml(res.callId || "N/A")}</code><br>📞 目標號碼：<b>${escapeHtml(res.e164ShopPhone || shopPhone)}</b><br>⏳ 正在即時追蹤通話狀態...`;
+        statusBox.innerHTML = `✅ 後端已透過 Twilio + Gemini Live 發起撥號！<br>🆔 通話 ID：<code>${escapeHtml(res.callId || "N/A")}</code><br>📞 目標號碼：<b>${escapeHtml(res.e164ShopPhone || shopPhone)}</b><br>⏳ 正在即時追蹤通話狀態...`;
         if (res.callId) {
             pollAiCallStatus(res.callId);
         } else {
@@ -948,7 +948,7 @@ async function startAiPhoneCall() {
             startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
         }
     } catch (e) {
-        statusBox.innerHTML = `⚠️ <b>無法發起真實撥號</b>：${escapeHtml(e.message)}<br>👉 請確認後端 <code>.env</code> 或 Cloud Run 環境變數已設定 <code>VAPI_API_KEY</code> 與 <code>VAPI_PHONE_NUMBER_ID</code>（並已重新部署後端），或先點擊上方的「🧪 模擬通話測試」預覽流程！`;
+        statusBox.innerHTML = `⚠️ <b>無法發起真實撥號</b>：${escapeHtml(e.message)}<br>👉 請確認 Cloud Run 環境變數已設定 <code>GEMINI_API_KEY</code>、<code>TWILIO_ACCOUNT_SID</code>、<code>TWILIO_AUTH_TOKEN</code> 與 <code>TWILIO_FROM_NUMBER</code>，或先點擊上方的「🧪 模擬通話測試」預覽流程！`;
         startBtn.disabled = false;
         startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
     }
