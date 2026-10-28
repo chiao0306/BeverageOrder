@@ -940,11 +940,69 @@ async function startAiPhoneCall() {
 
     try {
         const res = await apiPost("startAiPhoneCall", { callData: payload });
-        statusBox.innerHTML = `✅ 後端已發起撥號！通話 ID：<b>${escapeHtml(res.callId || "N/A")}</b><br>${escapeHtml(res.message || "")}`;
+        statusBox.innerHTML = `✅ 後端已透過 Vapi + Twilio 發起撥號！<br>🆔 通話 ID：<code>${escapeHtml(res.callId || "N/A")}</code><br>📞 目標號碼：<b>${escapeHtml(res.e164ShopPhone || shopPhone)}</b><br>⏳ 正在即時追蹤通話狀態...`;
+        if (res.callId) {
+            pollAiCallStatus(res.callId);
+        } else {
+            startBtn.disabled = false;
+            startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
+        }
     } catch (e) {
-        statusBox.innerHTML = `⚠️ <b>後端尚未綁定外撥電話服務金鑰</b>（訊息：${escapeHtml(e.message)}）<br>👉 你可以先點擊上方的「🧪 模擬通話測試」預覽完整體驗，等我們決定好採用哪個語音 AI 平台後，即可在 <code>main.py</code> 啟用真實撥號！`;
-    } finally {
+        statusBox.innerHTML = `⚠️ <b>無法發起真實撥號</b>：${escapeHtml(e.message)}<br>👉 請確認後端 <code>.env</code> 或 Cloud Run 環境變數已設定 <code>VAPI_API_KEY</code> 與 <code>VAPI_PHONE_NUMBER_ID</code>（並已重新部署後端），或先點擊上方的「🧪 模擬通話測試」預覽流程！`;
         startBtn.disabled = false;
         startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
     }
+}
+
+let aiCallPollTimer = null;
+
+async function pollAiCallStatus(callId) {
+    if (aiCallPollTimer) clearTimeout(aiCallPollTimer);
+    const statusBox = document.getElementById("aiCallStatusBox");
+    const startBtn = document.getElementById("startAiCallBtn");
+
+    const statusMap = {
+        "queued": "⏳ 排隊撥號中 (queued)",
+        "ringing": "🔔 店家電話響鈴中 (ringing)...",
+        "in-progress": "🗣️ AI 正在與店員通話點餐中 (in-progress)...",
+        "forwarding": "🔀 轉接中 (forwarding)...",
+        "ended": "✅ 通話已結束 (ended)"
+    };
+
+    try {
+        const info = await apiPost("getAiCallStatus", { callId });
+        const statusText = statusMap[info.status] || info.status;
+
+        let html = `<div><b>📡 通話狀態：</b>${escapeHtml(statusText)}</div>`;
+        if (info.transcript) {
+            html += `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:180px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 即時逐字稿：</b>\n${escapeHtml(info.transcript)}</div>`;
+        }
+        if (info.summary) {
+            html += `<div style="margin-top:8px; color:#1e40af;"><b>💡 AI 通話摘要：</b>${escapeHtml(info.summary)}</div>`;
+        }
+        if (info.recordingUrl) {
+            html += `<div style="margin-top:8px;"><audio controls src="${escapeHtml(info.recordingUrl)}" style="width:100%; height:36px;"></audio></div>`;
+        }
+
+        statusBox.innerHTML = html;
+
+        if (info.status === "ended") {
+            startBtn.disabled = false;
+            startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
+
+            const p = info.pickupInfo || {};
+            if (p.totalAmount) document.getElementById("pickupTotalAmount").value = p.totalAmount;
+            if (p.pickupTime) document.getElementById("pickupTime").value = p.pickupTime;
+            if (p.bagInfo) document.getElementById("pickupBagInfo").value = p.bagInfo;
+            if (p.orderNotes) document.getElementById("pickupOrderNo").value = p.orderNotes;
+            savePickupInfo();
+
+            statusBox.innerHTML += `<div style="margin-top:8px; color:#16a34a; font-weight:bold;">🎉 已自動從通話結果擷取取餐資訊並填入下方紀錄卡！</div>`;
+            return;
+        }
+    } catch (err) {
+        console.warn("輪詢通話狀態失敗:", err);
+    }
+
+    aiCallPollTimer = setTimeout(() => pollAiCallStatus(callId), 3000);
 }
