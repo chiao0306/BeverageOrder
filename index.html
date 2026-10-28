@@ -31,6 +31,7 @@
             <div id="closedShopContainer" style="display: none; justify-content: center; flex-wrap: wrap; gap: 10px; opacity: 0.6;"></div>
 
             <button class="btn btn-sheet" style="margin-top: 20px;" onclick="loadSummary()">📊 查看目前訂單</button>
+            <button class="btn btn-ai-call" onclick="openAiCallPage()">📞 AI 幫我打電話訂飲料</button>
         </div>
 
         <!-- 菜單頁面 -->
@@ -115,9 +116,114 @@
             </div>
             <div id="summaryLoading">讀取中... ⏳</div>
             <div class="summary-table-wrapper" id="summaryTableWrapper" style="display: none;"></div>
+            <button class="btn btn-ai-call" onclick="openAiCallPage()">📞 前往 AI 電話訂購</button>
             <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
         </div>
         
+        <!-- 📞 AI 電話訂購頁面 -->
+        <div id="page-ai-call" class="page">
+            <!-- 1. 已點飲料彙整清單 -->
+            <div class="ai-section-card">
+                <div class="ai-section-header">
+                    <span>🥤 1. 目前已點飲料彙整</span>
+                    <button type="button" class="btn-mini" onclick="refreshAiOrderList()">🔄 重新整理</button>
+                </div>
+                <div id="aiOrderLoading" style="text-align: center; padding: 12px; color: #666;">正在彙整目前訂單... ⏳</div>
+                <div id="aiOrderSummaryStats" class="ai-stats-bar" style="display: none;"></div>
+                <div id="aiAggregatedList" class="ai-drink-list" style="display: none;"></div>
+            </div>
+
+            <!-- 2. 店家與發話電話設定 -->
+            <div class="ai-section-card">
+                <div class="ai-section-header">
+                    <span>☎️ 2. 店家與撥號資訊</span>
+                </div>
+                <div class="form-group">
+                    <label for="aiShopName">店家名稱：</label>
+                    <input type="text" id="aiShopName" placeholder="例如：50嵐（小港店）" oninput="updateAiScriptPreview(); savePickupInfo();">
+                </div>
+                <div class="form-group">
+                    <label for="aiShopPhone">店家電話（受話方）：</label>
+                    <input type="tel" id="aiShopPhone" placeholder="例如：07-8012345 或 0912345678" oninput="updateAiScriptPreview(); savePickupInfo();">
+                </div>
+                <div class="form-group">
+                    <label for="aiCallerPhone">發話 / 取餐聯絡電話（某人的電話）：</label>
+                    <input type="tel" id="aiCallerPhone" placeholder="例如：0912-345-678" oninput="updateAiScriptPreview(); savePickupInfo();">
+                    <div class="field-hint">💡 若此號碼已驗證可作為來電顯示；同時 AI 會在電話中主動報此號碼作為取餐聯絡電話。</div>
+                </div>
+                <div class="form-group">
+                    <label for="aiCallerName">取餐人稱呼（選填）：</label>
+                    <input type="text" id="aiCallerName" placeholder="例如：陳先生 / 手銲股" value="陳先生" oninput="updateAiScriptPreview(); savePickupInfo();">
+                </div>
+            </div>
+
+            <!-- 3. 訂購需求設定 -->
+            <div class="ai-section-card">
+                <div class="ai-section-header">
+                    <span>💬 3. 請 AI 詢問與轉達的需求</span>
+                </div>
+                <div class="checkbox-group">
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="reqAskPrice" checked onchange="updateAiScriptPreview()">
+                        <span>💰 詢問總金額多少（並核對明細）</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="reqNeedBag" checked onchange="updateAiScriptPreview()">
+                        <span>🛍️ 要買塑膠袋（請店員一起算進總金額）</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="reqAskPickupTime" checked onchange="updateAiScriptPreview()">
+                        <span>🕒 詢問幾點可以去拿飲料</span>
+                    </label>
+                </div>
+                <div class="form-group" style="margin-top: 12px; margin-bottom: 0;">
+                    <label for="aiCustomNotes">其他補充需求（可自由輸入）：</label>
+                    <textarea id="aiCustomNotes" rows="2" placeholder="例如：自取、不用吸管、需要統編..." oninput="updateAiScriptPreview()"></textarea>
+                </div>
+            </div>
+
+            <!-- 4. AI 講稿預覽與撥打控制 -->
+            <div class="ai-section-card">
+                <div class="ai-section-header">
+                    <span>🤖 4. AI 電話應對腳本預覽</span>
+                </div>
+                <div id="aiScriptPreview" class="ai-script-box"></div>
+                <button type="button" class="btn btn-ai-call" id="startAiCallBtn" onclick="startAiPhoneCall()">📞 請 AI 立即打電話訂飲料</button>
+                <button type="button" class="btn btn-simulate" id="simulateAiCallBtn" onclick="simulateAiPhoneCall()">🧪 模擬通話測試（免接電話 API 預覽流程）</button>
+                <div id="aiCallStatusBox" class="ai-call-status" style="display: none;"></div>
+            </div>
+
+            <!-- 5. 取飲料資訊紀錄卡 -->
+            <div class="ai-section-card pickup-info-card">
+                <div class="ai-section-header">
+                    <span>📝 5. 取飲料資訊紀錄</span>
+                    <span id="pickupSavedBadge" class="saved-badge" style="display: none;">已儲存</span>
+                </div>
+                <div class="field-hint" style="margin-bottom: 12px;">AI 通話結束後會自動填入以下結果，你也可以隨時手動修改並複製到群組：</div>
+                <div class="pickup-grid">
+                    <div class="form-group">
+                        <label for="pickupTotalAmount">💰 店家確認總金額：</label>
+                        <input type="text" id="pickupTotalAmount" placeholder="待確認 (例: $522 含袋)" oninput="savePickupInfo()">
+                    </div>
+                    <div class="form-group">
+                        <label for="pickupTime">🕒 預計幾點去拿：</label>
+                        <input type="text" id="pickupTime" placeholder="待確認 (例: 14:30)" oninput="savePickupInfo()">
+                    </div>
+                    <div class="form-group">
+                        <label for="pickupBagInfo">🛍️ 塑膠袋狀態：</label>
+                        <input type="text" id="pickupBagInfo" placeholder="例：需要塑膠袋 (已加購)" value="需要塑膠袋" oninput="savePickupInfo()">
+                    </div>
+                    <div class="form-group">
+                        <label for="pickupOrderNo">🔢 取餐號碼 / 備註：</label>
+                        <input type="text" id="pickupOrderNo" placeholder="例：留電話末三碼 / 取餐號" oninput="savePickupInfo()">
+                    </div>
+                </div>
+                <button type="button" class="btn btn-copy-pickup" onclick="copyPickupSummary()">📋 一鍵複製取餐資訊（貼到群組）</button>
+            </div>
+
+            <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
+        </div>
+
     </div> <!-- 🌟 關鍵點：<div class="content"> 的結尾在這裡！ -->
 
     <!-- 💡 訂單確認彈窗 (獨立於所有頁面之外，放在這裡最完美) -->

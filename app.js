@@ -565,6 +565,11 @@ function updateHeaderForPage(pageId) {
     } else if (pageId === "page-success") {
         header.innerText = "訂購完成";
         header.style.background = "#27AE60";
+    } else if (pageId === "page-ai-call") {
+        header.innerText = "📞 AI 電話訂飲料";
+        header.style.background = "#2563EB";
+        return;
+        header.style.background = "#27AE60";
     } else if (pageId === "page-menu" || pageId === "page-order") {
         const shopData = allShopsDatabase[currentShopName];
         if (shopData) {
@@ -603,3 +608,343 @@ function toggleTableView() {
     updateToggleButtonText(); 
 }
 function updateToggleButtonText() { document.getElementById("toggleViewBtn").innerText = isCompactView ? "↔️ 放大檢視" : "🔍 縮小檢視"; }
+
+
+// ==========================================
+// 7. 📞 AI 電話訂購頁面邏輯
+// ==========================================
+let aiAggregatedItems = [];
+let aiEstimatedTotalPrice = 0;
+let aiTotalCups = 0;
+
+async function openAiCallPage() {
+    showPage("page-ai-call");
+    updateHeaderForPage("page-ai-call");
+
+    loadSavedPickupInfo();
+
+    const shopInput = document.getElementById("aiShopName");
+    if (shopInput && !shopInput.value.trim() && activeShop) {
+        shopInput.value = activeShop;
+    }
+
+    await refreshAiOrderList();
+}
+
+async function refreshAiOrderList() {
+    const loadingEl = document.getElementById("aiOrderLoading");
+    const statsEl = document.getElementById("aiOrderSummaryStats");
+    const listEl = document.getElementById("aiAggregatedList");
+
+    loadingEl.style.display = "block";
+    loadingEl.innerText = "正在彙整目前訂單... ⏳";
+    statsEl.style.display = "none";
+    listEl.style.display = "none";
+
+    try {
+        const data = await apiGet("getOrderData");
+        aggregateOrderItems(data);
+        renderAiOrderList();
+        updateAiScriptPreview();
+    } catch (e) {
+        loadingEl.innerText = "訂單讀取失敗：" + e.message;
+        console.error(e);
+    }
+}
+
+function aggregateOrderItems(rows) {
+    aiAggregatedItems = [];
+    aiEstimatedTotalPrice = 0;
+    aiTotalCups = 0;
+
+    if (!rows || rows.length <= 1) return;
+
+    const map = new Map();
+
+    // 第 0 列為表頭 [姓名, 飲品, 容量, 甜度, 冰塊, 配料, 總金額, 差額]
+    for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const personName = String(row[0] || "").trim();
+        const drink = String(row[1] || "").trim();
+        const size = String(row[2] || "").trim();
+        const sugar = String(row[3] || "").trim();
+        const ice = String(row[4] || "").trim();
+        const topping = String(row[5] || "").trim();
+        const price = parseFloat(row[6]);
+
+        // 過濾空白列或試算表最底部的「總計/合計」列
+        if (!drink) continue;
+        if (personName.includes("總計") || personName.includes("合計") || drink.includes("總計")) continue;
+        if (!size && !sugar && !ice) continue;
+
+        const cleanTopping = (!topping || topping === "無" || topping === "-") ? "無配料" : `加${topping}`;
+        const key = `${drink}|${size}|${sugar}|${ice}|${cleanTopping}`;
+
+        if (!map.has(key)) {
+            map.set(key, {
+                drink,
+                size,
+                sugar,
+                ice,
+                topping: cleanTopping,
+                count: 0,
+                subtotal: 0,
+                orderers: []
+            });
+        }
+
+        const item = map.get(key);
+        item.count += 1;
+        if (!isNaN(price)) {
+            item.subtotal += price;
+            aiEstimatedTotalPrice += price;
+        }
+        if (personName) item.orderers.push(personName);
+        aiTotalCups += 1;
+    }
+
+    aiAggregatedItems = Array.from(map.values()).sort((a, b) => {
+        const cmp = a.drink.localeCompare(b.drink, "zh-Hant");
+        return cmp !== 0 ? cmp : b.count - a.count;
+    });
+}
+
+function renderAiOrderList() {
+    const loadingEl = document.getElementById("aiOrderLoading");
+    const statsEl = document.getElementById("aiOrderSummaryStats");
+    const listEl = document.getElementById("aiAggregatedList");
+
+    loadingEl.style.display = "none";
+    statsEl.style.display = "flex";
+    listEl.style.display = "block";
+
+    statsEl.innerHTML = `
+        <span>🥤 總杯數：${aiTotalCups} 杯</span>
+        <span>💰 試算表預估金額：$${aiEstimatedTotalPrice}</span>
+    `;
+
+    if (aiAggregatedItems.length === 0) {
+        listEl.innerHTML = `<div style="text-align:center; color:#888; padding: 12px;">目前尚無已點飲料資料</div>`;
+        return;
+    }
+
+    listEl.innerHTML = aiAggregatedItems.map(item => {
+        const toppingBadge = item.topping === "無配料" ? "" : ` / ${escapeHtml(item.topping)}`;
+        const specText = `${escapeHtml(item.size)} / ${escapeHtml(item.sugar)} / ${escapeHtml(item.ice)}${toppingBadge}`;
+        return `
+            <div class="ai-drink-item">
+                <div>
+                    <div style="font-weight: bold; color: #111827;">${escapeHtml(item.drink)}</div>
+                    <div style="font-size: 13px; color: #4b5563;">${specText} <span style="color:#9ca3af;">(${escapeHtml(item.orderers.join("、"))})</span></div>
+                </div>
+                <span class="ai-drink-count">x ${item.count} 杯</span>
+            </div>
+        `;
+    }).join("");
+}
+
+function buildSpokenDrinkLines() {
+    if (aiAggregatedItems.length === 0) {
+        return ["（目前尚無飲料明細，請先點餐或重新整理）"];
+    }
+    return aiAggregatedItems.map((item, idx) => {
+        const cleanDrinkName = item.drink.replace(/\s*\(.*?\)/g, "");
+        const cleanSize = item.size.includes("L") || item.size.includes("大") ? "大杯"
+                        : item.size.includes("M") || item.size.includes("中") ? "中杯"
+                        : item.size;
+        const toppingPart = item.topping === "無配料" ? "" : `、${item.topping}`;
+        return `${idx + 1}. ${cleanDrinkName}，${cleanSize}，${item.sugar}${item.ice}${toppingPart}，${item.count} 杯`;
+    });
+}
+
+function updateAiScriptPreview() {
+    const shopName = document.getElementById("aiShopName")?.value.trim() || activeShop || "店家";
+    const callerPhone = document.getElementById("aiCallerPhone")?.value.trim() || "（未填電話）";
+    const callerName = document.getElementById("aiCallerName")?.value.trim() || "我們";
+    const reqPrice = document.getElementById("reqAskPrice")?.checked;
+    const reqBag = document.getElementById("reqNeedBag")?.checked;
+    const reqTime = document.getElementById("reqAskPickupTime")?.checked;
+    const customNotes = document.getElementById("aiCustomNotes")?.value.trim() || "";
+
+    const spokenLines = buildSpokenDrinkLines();
+    const askParts = [];
+    if (reqBag) askParts.push("我們需要買塑膠袋裝起來");
+    if (reqPrice) askParts.push(`請問這樣總共多少錢？（試算表預估為 $${aiEstimatedTotalPrice} 元，不含袋）`);
+    if (reqTime) askParts.push("請問大約幾點可以過去拿飲料？");
+    if (customNotes) askParts.push(`另外補充需求：${customNotes}`);
+
+    const scriptText = [
+        `【AI 撥通「${shopName}」後的對話目標】`,
+        `🗣️ 開場白：「你好，我要電話訂飲料自取，總共 ${aiTotalCups} 杯，我這邊慢慢念給您聽好嗎？」`,
+        ``,
+        `📋 依序報單（每念完一品項會停頓等店員確認）：`,
+        ...spokenLines.map(line => `   ${line}`),
+        ``,
+        `💬 結尾詢問與留資料：`,
+        ...askParts.map(p => `   • ${p}`),
+        `   • 「取餐人稱呼是 ${callerName}，聯絡電話是 ${callerPhone}，謝謝！」`
+    ].join("\n");
+
+    const previewEl = document.getElementById("aiScriptPreview");
+    if (previewEl) previewEl.innerText = scriptText;
+}
+
+function savePickupInfo() {
+    const data = {
+        shopName: document.getElementById("aiShopName")?.value || "",
+        shopPhone: document.getElementById("aiShopPhone")?.value || "",
+        callerPhone: document.getElementById("aiCallerPhone")?.value || "",
+        callerName: document.getElementById("aiCallerName")?.value || "",
+        totalAmount: document.getElementById("pickupTotalAmount")?.value || "",
+        pickupTime: document.getElementById("pickupTime")?.value || "",
+        bagInfo: document.getElementById("pickupBagInfo")?.value || "",
+        orderNo: document.getElementById("pickupOrderNo")?.value || ""
+    };
+    try {
+        localStorage.setItem("beverage_ai_pickup_info", JSON.stringify(data));
+        const badge = document.getElementById("pickupSavedBadge");
+        if (badge) {
+            badge.style.display = "inline-block";
+            setTimeout(() => { badge.style.display = "none"; }, 1500);
+        }
+    } catch (e) {
+        console.warn("無法儲存至 localStorage:", e);
+    }
+}
+
+function loadSavedPickupInfo() {
+    try {
+        const raw = localStorage.getItem("beverage_ai_pickup_info");
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (data.shopName && !document.getElementById("aiShopName").value) {
+            document.getElementById("aiShopName").value = data.shopName;
+        }
+        if (data.shopPhone) document.getElementById("aiShopPhone").value = data.shopPhone;
+        if (data.callerPhone) document.getElementById("aiCallerPhone").value = data.callerPhone;
+        if (data.callerName) document.getElementById("aiCallerName").value = data.callerName;
+        if (data.totalAmount) document.getElementById("pickupTotalAmount").value = data.totalAmount;
+        if (data.pickupTime) document.getElementById("pickupTime").value = data.pickupTime;
+        if (data.bagInfo) document.getElementById("pickupBagInfo").value = data.bagInfo;
+        if (data.orderNo) document.getElementById("pickupOrderNo").value = data.orderNo;
+    } catch (e) {
+        console.warn("讀取儲存的取餐資訊失敗:", e);
+    }
+}
+
+function copyPickupSummary() {
+    const shopName = document.getElementById("aiShopName")?.value.trim() || activeShop || "飲料店";
+    const shopPhone = document.getElementById("aiShopPhone")?.value.trim() || "-";
+    const callerName = document.getElementById("aiCallerName")?.value.trim() || "-";
+    const callerPhone = document.getElementById("aiCallerPhone")?.value.trim() || "-";
+    const totalAmount = document.getElementById("pickupTotalAmount")?.value.trim() || `預估 $${aiEstimatedTotalPrice}`;
+    const pickupTime = document.getElementById("pickupTime")?.value.trim() || "待確認";
+    const bagInfo = document.getElementById("pickupBagInfo")?.value.trim() || "無";
+    const orderNo = document.getElementById("pickupOrderNo")?.value.trim() || "-";
+
+    const text = [
+        `🥤 【手銲股取飲料通知】`,
+        `🏪 店家：${shopName} (${shopPhone})`,
+        `📦 總杯數：共 ${aiTotalCups} 杯`,
+        `💰 總金額：${totalAmount}`,
+        `🛍️ 塑膠袋：${bagInfo}`,
+        `🕒 取餐時間：${pickupTime}`,
+        `👤 訂購聯絡人：${callerName} (${callerPhone})`,
+        `🔢 備註/取餐號：${orderNo}`
+    ].join("\n");
+
+    navigator.clipboard.writeText(text).then(() => {
+        alert("✅ 已複製取餐資訊！可以直接貼到 LINE 群組囉：\n\n" + text);
+    }).catch(() => {
+        prompt("請手動複製以下取餐資訊：", text);
+    });
+}
+
+async function simulateAiPhoneCall() {
+    const statusBox = document.getElementById("aiCallStatusBox");
+    const simBtn = document.getElementById("simulateAiCallBtn");
+    const shopName = document.getElementById("aiShopName")?.value.trim() || activeShop || "50嵐";
+    const shopPhone = document.getElementById("aiShopPhone")?.value.trim() || "07-801xxxx";
+    const callerPhone = document.getElementById("aiCallerPhone")?.value.trim() || "0912-345-678";
+    const callerName = document.getElementById("aiCallerName")?.value.trim() || "陳先生";
+    const needBag = document.getElementById("reqNeedBag")?.checked;
+
+    simBtn.disabled = true;
+    statusBox.style.display = "block";
+    statusBox.innerHTML = `📡 <b>[模擬模式]</b> 正在撥號至 <b>${escapeHtml(shopName)} (${escapeHtml(shopPhone)})</b>...`;
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    await sleep(1200);
+    statusBox.innerHTML += `<br>🔔 店員接聽：「喂你好，${escapeHtml(shopName)}請問要點什麼？」`;
+    await sleep(1300);
+    statusBox.innerHTML += `<br>🤖 AI 助理：「你好，我要訂飲料自取，總共 ${aiTotalCups} 杯。${escapeHtml(buildSpokenDrinkLines().join("；"))}。」`;
+    await sleep(1500);
+    const bagFee = needBag ? (aiTotalCups > 6 ? 4 : 2) : 0;
+    const finalSimulatedPrice = aiEstimatedTotalPrice + bagFee;
+    statusBox.innerHTML += `<br>🤖 AI 助理：「${needBag ? "我們要買塑膠袋，" : ""}請問這樣總共多少錢？幾點可以過去拿？」`;
+    await sleep(1500);
+
+    const pickupDate = new Date(Date.now() + 20 * 60000);
+    const pickupTimeStr = `${String(pickupDate.getHours()).padStart(2, "0")}:${String(pickupDate.getMinutes()).padStart(2, "0")}`;
+
+    statusBox.innerHTML += `<br>👩‍🍳 店員：「袋子幫你算 ${bagFee} 元喔，這樣總共 ${finalSimulatedPrice} 元，大概 20 分鐘後、${pickupTimeStr} 可以來拿，請問貴姓電話？」`;
+    await sleep(1300);
+    statusBox.innerHTML += `<br>🤖 AI 助理：「好，我姓${escapeHtml(callerName.charAt(0))}，電話是 ${escapeHtml(callerPhone)}，待會過去拿，謝謝！」`;
+    await sleep(800);
+    statusBox.innerHTML += `<br><span style="color:#16a34a; font-weight:bold;">✅ 通話結束！AI 已自動將取飲料資訊填入下方紀錄卡。</span>`;
+
+    document.getElementById("pickupTotalAmount").value = `$${finalSimulatedPrice}${needBag ? ` (含塑膠袋 $${bagFee})` : ""}`;
+    document.getElementById("pickupTime").value = `${pickupTimeStr} (約 20 分鐘後)`;
+    document.getElementById("pickupBagInfo").value = needBag ? `已加購塑膠袋 (+$${bagFee})` : "不需塑膠袋";
+    document.getElementById("pickupOrderNo").value = `留電 ${callerPhone} (${callerName})`;
+    savePickupInfo();
+    simBtn.disabled = false;
+}
+
+async function startAiPhoneCall() {
+    const shopName = document.getElementById("aiShopName")?.value.trim();
+    const shopPhone = document.getElementById("aiShopPhone")?.value.trim();
+    const callerPhone = document.getElementById("aiCallerPhone")?.value.trim();
+    const callerName = document.getElementById("aiCallerName")?.value.trim() || "先生/小姐";
+
+    if (!shopName) { alert("請輸入店家名稱！"); return; }
+    if (!shopPhone) { alert("請輸入店家電話！"); return; }
+    if (!callerPhone) { alert("請輸入發話 / 取餐聯絡電話！"); return; }
+    if (aiAggregatedItems.length === 0) {
+        if (!confirm("目前尚未偵測到已點飲料明細，確定仍要撥出嗎？")) return;
+    }
+
+    const startBtn = document.getElementById("startAiCallBtn");
+    const statusBox = document.getElementById("aiCallStatusBox");
+    startBtn.disabled = true;
+    startBtn.innerText = "⏳ 正在請求後端發起 AI 通話...";
+    statusBox.style.display = "block";
+    statusBox.innerHTML = "📡 正在傳送訂單與撥號指令至 Cloud Run 後端...";
+
+    const payload = {
+        shopName,
+        shopPhone,
+        callerPhone,
+        callerName,
+        totalCups: aiTotalCups,
+        estimatedPrice: aiEstimatedTotalPrice,
+        items: aiAggregatedItems,
+        spokenLines: buildSpokenDrinkLines(),
+        requirements: {
+            askPrice: document.getElementById("reqAskPrice")?.checked,
+            needBag: document.getElementById("reqNeedBag")?.checked,
+            askPickupTime: document.getElementById("reqAskPickupTime")?.checked,
+            customNotes: document.getElementById("aiCustomNotes")?.value.trim() || ""
+        }
+    };
+
+    try {
+        const res = await apiPost("startAiPhoneCall", { callData: payload });
+        statusBox.innerHTML = `✅ 後端已發起撥號！通話 ID：<b>${escapeHtml(res.callId || "N/A")}</b><br>${escapeHtml(res.message || "")}`;
+    } catch (e) {
+        statusBox.innerHTML = `⚠️ <b>後端尚未綁定外撥電話服務金鑰</b>（訊息：${escapeHtml(e.message)}）<br>👉 你可以先點擊上方的「🧪 模擬通話測試」預覽完整體驗，等我們決定好採用哪個語音 AI 平台後，即可在 <code>main.py</code> 啟用真實撥號！`;
+    } finally {
+        startBtn.disabled = false;
+        startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
+    }
+}
