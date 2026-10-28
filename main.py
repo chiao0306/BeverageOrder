@@ -429,12 +429,17 @@ def start_ai_phone_call(call_data: dict) -> dict:
     }
 
     # TwiML：電話一接通立即建立雙向 Media Stream 連回 Cloud Run 的 /twilio-media-stream/<call_id>
-    twiml = f"""<Response>
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
     <Connect>
         <Stream url="{stream_ws_url}" />
     </Connect>
 </Response>"""
+    ACTIVE_CALLS[call_id]["twiml"] = twiml
+    twiml_url = f"{base_url}/twilio-twiml/{call_id}"
 
+    # 注意：Twilio Trial 免費試用帳號不允許傳送 inline Twiml 與 StatusCallbackEvent 參數，
+    # 必須改用 Url 指向本服務的 /twilio-twiml/<call_id> 端點，並僅傳送 StatusCallback
     twilio_url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Calls.json"
     resp = requests.post(
         twilio_url,
@@ -442,10 +447,8 @@ def start_ai_phone_call(call_data: dict) -> dict:
         data={
             "To": e164_shop_phone,
             "From": from_phone,
-            "Twiml": twiml,
+            "Url": twiml_url,
             "StatusCallback": status_callback_url,
-            "StatusCallbackEvent": ["initiated", "ringing", "answered", "completed"],
-            "StatusCallbackMethod": "POST",
         },
         timeout=20,
     )
@@ -465,6 +468,19 @@ def start_ai_phone_call(call_data: dict) -> dict:
         "e164ShopPhone": e164_shop_phone,
         "message": f"已透過 Twilio + Gemini Live ({GEMINI_LIVE_MODEL}) 撥號至 {shop_name} ({e164_shop_phone})！",
     }
+
+
+@app.route("/twilio-twiml/<call_id>", methods=["GET", "POST"])
+def twilio_twiml(call_id: str):
+    """回傳 TwiML XML 給 Twilio，指示接通後建立雙向 WebSocket Media Stream。"""
+    call_state = ACTIVE_CALLS.get(call_id)
+    if not call_state:
+        return Response(
+            '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
+            mimetype="text/xml",
+        )
+    call_state["status"] = "in-progress"
+    return Response(call_state["twiml"], mimetype="text/xml")
 
 
 @app.route("/twilio-status-callback/<call_id>", methods=["POST"])
