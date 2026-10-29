@@ -775,9 +775,9 @@ function updateAiScriptPreview() {
 
     const scriptText = [
         `【AI 撥通「${shopName}」後的對話目標】`,
-        `🗣️ 開場白：「你好，我要電話訂飲料自取，總共 ${aiTotalCups} 杯，我這邊慢慢念給您聽好嗎？」`,
+        `🗣️ 開場白：「你好，我要電話訂飲料自取，總共 ${aiTotalCups} 杯，我先跟你報第一杯。」`,
         ``,
-        `📋 依序報單（每念完一品項會停頓等店員確認）：`,
+        `📋 依序報單（一次念 1 個品項，等店員出聲才念下一個；店員超過 5 秒沒出聲會再詢問）：`,
         ...spokenLines.map(line => `   ${line}`),
         ``,
         `💬 結尾詢問與留資料：`,

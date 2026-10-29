@@ -1,5 +1,6 @@
 """飲料訂購後端：Cloud Run (Flask + WebSocket) 串接 Google Sheets、Twilio Voice 與 Gemini Live API。"""
 import asyncio
+import array
 import base64
 import json
 import os
@@ -355,10 +356,10 @@ def build_beverage_system_prompt(call_data: dict) -> str:
 
 【極重要通話守則（必讀）】
 1. 請全程使用繁體中文（台灣口語習慣，例如：微糖微冰、大杯、好謝謝、對）對話，語氣自然親切，每次說話簡短扼要。
-2. 電話剛接通或店員說「喂你好」時，請先打招呼並直接開始點餐：「你好，請問是{shop_name}嗎？我要電話訂飲料自取，總共 {total_cups} 杯，我先跟你報第一杯。」說完這句話後，**不要停下來等許可，立刻接著唸第一、二個品項**。
-   - 店員回「好」、「OK」、「請說」、「嗯」、「可以」、「繼續」等任何簡短回應，都代表同意，你必須**立刻繼續唸下一個（或下 1~2 個）品項**，絕對不可以再問一次「方便嗎」，也不可以沉默等待。
+2. 電話剛接通或店員說「喂你好」時，請先打招呼並直接開始點餐：「你好，請問是{shop_name}嗎？我要電話訂飲料自取，總共 {total_cups} 杯，我先跟你報第一杯。」說完後立刻唸出清單第 1 個品項，然後停下來等店員回應。
+   - 店員回「好」、「OK」、「請說」、「嗯」、「可以」、「繼續」等任何簡短回應，都代表已記下上一個品項，你必須**立刻唸下一個品項**，絕對不可以再問一次「方便嗎」，也不可以沉默等待。
    - 每一輪你說完話，如果還有品項沒唸完、或第 5 點的事項還沒完成，下一輪就必須主動繼續，直到全部完成。
-3. 店員需要時間按 POS 收銀機！報飲料時，**一次只唸 1 到 2 個品項**，唸完後務必停下來等店員回應「好」、「嗯」、「還有嗎」之後，再唸下一個品項！絕對不要一口氣把整張清單唸完。
+3. 店員需要時間按 POS 收銀機！報飲料時，**一次只唸 1 個品項（含杯數、大小、甜度、冰量、配料）**，唸完後務必停下來，等店員出聲回應（例如「好」、「嗯」、「還有嗎」）後，才唸下一個品項！絕對不要連續唸多個品項。若店員沒有回應，系統會提醒你，屆時請簡短詢問店員並重複剛才的品項。
 4. 如果某個品項或配料賣完了，請先問店員有什麼推薦替代的，或改選同價位的相近配料（例如波霸賣完改珍珠）。
 5. 全部共 {total_cups} 杯飲料唸完後，請務必完成以下事項：
 {tasks_block}
@@ -512,6 +513,83 @@ def twilio_status_callback(call_id: str):
     return ("", 204)
 
 
+def _build_live_config(system_prompt: str) -> types.LiveConnectConfig:
+    """建立 Gemini Live 連線設定（降低對環境雜音/回音的誤打斷敏感度）。"""
+    return types.LiveConnectConfig(
+        response_modalities=[types.Modality.AUDIO],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=GEMINI_VOICE_NAME
+                )
+            )
+        ),
+        system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
+        realtime_input_config=types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_LOW,
+                silence_duration_ms=600,
+            )
+        ),
+        input_audio_transcription=types.AudioTranscriptionConfig(),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
+    )
+
+
+SILENCE_NUDGE_SECONDS = 5.0
+MAX_CONSECUTIVE_NUDGES = 3
+SILENCE_NUDGE_TEXT = (
+    "（系統提示：店員已經超過 5 秒沒有出聲回應。請用一句簡短的台灣口語禮貌詢問店員，"
+    "例如「不好意思，請問聽得到嗎？」，並簡短重複你剛剛最後唸的那個品項，然後等店員回應。）"
+)
+
+
+class SilenceWatcher:
+    """追蹤 AI 說完話後店員是否超過 5 秒沒出聲；若是，提醒 AI 再次詢問店員。"""
+
+    def __init__(self):
+        self.play_end = 0.0  # AI 語音預計播放完畢的時間點
+        self.last_voice = 0.0  # 最近一次偵測到店員聲音
+        self.waiting = False  # AI 已說完一輪、正在等店員回應
+        self.nudges = 0
+
+    def on_audio_out(self, nbytes: int, sample_rate: int = 24000):
+        now = time.time()
+        self.play_end = max(now, self.play_end) + nbytes / 2 / sample_rate
+
+    def on_turn_complete(self):
+        self.waiting = True
+
+    def on_clerk_chunk(self, pcm16: bytes):
+        samples = array.array("h")
+        samples.frombytes(pcm16[: len(pcm16) // 2 * 2])
+        if samples and max(abs(s) for s in samples[::8]) > 1200:
+            self.last_voice = time.time()
+            self.waiting = False
+            self.nudges = 0
+
+    def due(self) -> bool:
+        if not self.waiting or self.nudges >= MAX_CONSECUTIVE_NUDGES:
+            return False
+        return time.time() - max(self.play_end, self.last_voice) > SILENCE_NUDGE_SECONDS
+
+    def mark_nudged(self):
+        self.waiting = False
+        self.nudges += 1
+
+
+async def _silence_watch_loop(session, watcher: SilenceWatcher, stop_event: asyncio.Event):
+    while not stop_event.is_set():
+        await asyncio.sleep(0.5)
+        if watcher.due():
+            watcher.mark_nudged()
+            try:
+                await session.send_realtime_input(text=SILENCE_NUDGE_TEXT)
+            except Exception as e:
+                print(f"[Silence Nudge Error]: {e}")
+                return
+
+
 @sock.route("/twilio-media-stream/<call_id>")
 def twilio_media_stream(ws, call_id: str):
     """處理 Twilio 雙向音訊 WebSocket 並橋接至 Google Gemini Live API (gemini-3.8-live)。"""
@@ -536,24 +614,11 @@ def twilio_media_stream(ws, call_id: str):
 async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
     """在非同步事件迴圈中雙向轉發 Twilio WebSocket 與 Gemini Live Session。"""
     client = genai.Client(api_key=GEMINI_API_KEY)
-    config = types.LiveConnectConfig(
-        response_modalities=[types.Modality.AUDIO],
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name=GEMINI_VOICE_NAME
-                )
-            )
-        ),
-        system_instruction=types.Content(
-            parts=[types.Part(text=call_state["systemPrompt"])]
-        ),
-        input_audio_transcription=types.AudioTranscriptionConfig(),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-    )
+    config = _build_live_config(call_state["systemPrompt"])
 
     stream_sid: Optional[str] = None
     stop_event = asyncio.Event()
+    watcher = SilenceWatcher()
     loop = asyncio.get_running_loop()
 
     async with client.aio.live.connect(model=GEMINI_LIVE_MODEL, config=config) as session:
@@ -574,6 +639,7 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
                     if content.model_turn:
                         for part in content.model_turn.parts:
                             if part.inline_data and part.inline_data.data and stream_sid:
+                                watcher.on_audio_out(len(part.inline_data.data))
                                 ulaw_bytes = pcm16_24k_to_ulaw_8k(part.inline_data.data)
                                 if ulaw_bytes:
                                     b64_payload = base64.b64encode(ulaw_bytes).decode("ascii")
@@ -605,6 +671,7 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
                             ai_text_buffer = ""
 
                     if content.turn_complete:
+                        watcher.on_turn_complete()
                         if user_text_buffer.strip():
                             call_state["transcriptLines"].append(f"👩‍🍳 店員：{user_text_buffer.strip()}")
                             user_text_buffer = ""
@@ -635,13 +702,14 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
                         stream_sid = msg.get("start", {}).get("streamSid")
                         # 電話接通後，觸發 AI 主動開口跟店員打招呼
                         await session.send_realtime_input(
-                            text="（電話已接通，請立刻主動向店員打招呼並詢問是否方便電話點餐）"
+                            text="（電話已接通，請立刻主動向店員打招呼，說明要訂飲料自取，並開始唸第一個品項）"
                         )
                     elif event_type == "media":
                         b64_audio = msg.get("media", {}).get("payload")
                         if b64_audio:
                             ulaw_bytes = base64.b64decode(b64_audio)
                             pcm16k_bytes = ulaw_8k_to_pcm16_16k(ulaw_bytes)
+                            watcher.on_clerk_chunk(pcm16k_bytes)
                             await session.send_realtime_input(
                                 audio=types.Blob(
                                     data=pcm16k_bytes,
@@ -655,7 +723,11 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
             finally:
                 stop_event.set()
 
-        await asyncio.gather(receive_from_gemini(), receive_from_twilio())
+        await asyncio.gather(
+            receive_from_gemini(),
+            receive_from_twilio(),
+            _silence_watch_loop(session, watcher, stop_event),
+        )
 
 
 # ==========================================
@@ -783,23 +855,10 @@ def voice_test_stream(ws):
 async def _bridge_browser_and_gemini_live(ws, call_state: dict):
     """雙向轉發瀏覽器麥克風音訊（16kHz PCM16）與 Gemini Live Session。"""
     client = genai.Client(api_key=GEMINI_API_KEY)
-    config = types.LiveConnectConfig(
-        response_modalities=[types.Modality.AUDIO],
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name=GEMINI_VOICE_NAME
-                )
-            )
-        ),
-        system_instruction=types.Content(
-            parts=[types.Part(text=call_state["systemPrompt"])]
-        ),
-        input_audio_transcription=types.AudioTranscriptionConfig(),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-    )
+    config = _build_live_config(call_state["systemPrompt"])
 
     stop_event = asyncio.Event()
+    watcher = SilenceWatcher()
     loop = asyncio.get_running_loop()
     lines = call_state["transcriptLines"]
 
@@ -831,6 +890,7 @@ async def _bridge_browser_and_gemini_live(ws, call_state: dict):
                     if content.model_turn:
                         for part in content.model_turn.parts:
                             if part.inline_data and part.inline_data.data:
+                                watcher.on_audio_out(len(part.inline_data.data))
                                 ws.send(
                                     json.dumps(
                                         {
@@ -847,6 +907,8 @@ async def _bridge_browser_and_gemini_live(ws, call_state: dict):
                         buffers["user"] += content.input_transcription.text
                     if content.output_transcription and content.output_transcription.text:
                         buffers["ai"] += content.output_transcription.text
+                    if content.turn_complete:
+                        watcher.on_turn_complete()
                     if content.turn_complete or content.interrupted is True:
                         flush()
             except Exception as e:
@@ -864,9 +926,11 @@ async def _bridge_browser_and_gemini_live(ws, call_state: dict):
                     m = json.loads(raw)
                     t = m.get("type")
                     if t == "audio" and m.get("data"):
+                        pcm_in = base64.b64decode(m["data"])
+                        watcher.on_clerk_chunk(pcm_in)
                         await session.send_realtime_input(
                             audio=types.Blob(
-                                data=base64.b64decode(m["data"]),
+                                data=pcm_in,
                                 mime_type="audio/pcm;rate=16000",
                             )
                         )
@@ -879,11 +943,13 @@ async def _bridge_browser_and_gemini_live(ws, call_state: dict):
 
         gemini_task = asyncio.ensure_future(receive_from_gemini())
         browser_task = asyncio.ensure_future(receive_from_browser())
+        watch_task = asyncio.ensure_future(_silence_watch_loop(session, watcher, stop_event))
         await stop_event.wait()
         # 給 Gemini 迴圈片刻收尾；不等待 blocking 的 ws.receive 執行緒
         await asyncio.wait({gemini_task}, timeout=2)
         gemini_task.cancel()
         browser_task.cancel()
+        watch_task.cancel()
 
 
 def get_ai_call_status(call_id: str) -> dict:
