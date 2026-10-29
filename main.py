@@ -138,6 +138,24 @@ def pcm16_24k_to_ulaw_8k(pcm24k_bytes: bytes) -> bytes:
     return bytes(out)
 
 
+def pcm16_16k_to_ulaw_8k(pcm16k_bytes: bytes) -> bytes:
+    """將瀏覽器麥克風傳來的 16kHz 16-bit PCM 降頻為 Twilio 需要的 8kHz μ-law (每 2 個樣本取 1)。"""
+    total_samples_8k = len(pcm16k_bytes) // 4
+    if total_samples_8k <= 0:
+        return b""
+    out = bytearray(total_samples_8k)
+    for i in range(total_samples_8k):
+        offset = i * 4
+        sample = struct.unpack_from("<h", pcm16k_bytes, offset)[0]
+        idx = (sample >> 2) + 8192
+        if idx < 0:
+            idx = 0
+        elif idx > 16383:
+            idx = 16383
+        out[i] = _PCM14_TO_ULAW[idx]
+    return bytes(out)
+
+
 # ==========================================
 # Google Sheets 工具函數
 # ==========================================
@@ -217,6 +235,10 @@ def do_post():
             result["data"] = start_ai_phone_call(payload.get("callData", {}))
         elif action == "getAiCallStatus":
             result["data"] = get_ai_call_status(payload.get("callId", ""))
+        elif action == "whisperAiCall":
+            result["data"] = whisper_ai_call(payload.get("callId", ""), payload.get("text", ""))
+        elif action == "hangupAiCall":
+            result["data"] = hangup_ai_call(payload.get("callId", ""))
         else:
             result["error"] = f"未知的 POST 請求: {action}"
     except Exception as e:
@@ -396,6 +418,112 @@ def _get_base_url() -> str:
     return f"{proto}://{host}"
 
 
+
+def _broadcast_to_monitors(call_state: dict, msg_dict: dict):
+    """將通話狀態、即時語音或逐字稿廣播給所有正在監聽此通話的網頁監控端點。"""
+    monitors = list(call_state.get("monitors") or [])
+    if not monitors:
+        return
+    payload = json.dumps(msg_dict)
+    for ws in monitors:
+        try:
+            ws.send(payload)
+        except Exception:
+            pass
+
+
+def _hangup_twilio_call(sid: str):
+    """透過 Twilio REST API 主動強制中斷電話通話。"""
+    if not sid or not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        return
+    try:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Calls/{sid}.json"
+        resp = requests.post(
+            url,
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+            data={"Status": "completed"},
+            timeout=5,
+        )
+        print(f"[Twilio Call Hung Up]: {sid} -> {resp.status_code}")
+    except Exception as e:
+        print(f"[Twilio Hangup Warning]: {e}")
+
+
+def _emergency_hangup(call_id: str):
+    """手動或緊急掛斷通話，並廣播結束事件。"""
+    call_state = ACTIVE_CALLS.get(call_id)
+    if not call_state:
+        return
+    print(f"[Emergency Hangup]: Triggered for call {call_id}")
+    call_state["status"] = "ended"
+    call_state["endedReason"] = "emergency_hangup"
+    sid = call_state.get("twilioCallSid")
+    if sid:
+        _hangup_twilio_call(sid)
+    stop_event = call_state.get("stop_event")
+    if stop_event:
+        stop_event.set()
+    extract_pickup_info_with_gemini(call_id)
+    _broadcast_to_monitors(call_state, {
+        "type": "ended",
+        "reason": "emergency_hangup",
+        "summary": "通話已被手動緊急掛斷。",
+        "pickupInfo": call_state.get("pickupInfo") or {},
+        "transcript": "\n".join(call_state.get("transcriptLines") or [])
+    })
+
+
+def _inject_whisper(call_state: dict, text: str):
+    """將店主的即時文字指示（耳語提示）注入正在通話中的 Gemini Live 腦中。"""
+    session = call_state.get("session")
+    loop = call_state.get("loop")
+    if session and loop and not loop.is_closed():
+        prompt = f"（幕後店主耳語指示：請立刻以自然親切的口吻向店員說明或更改：{text}）"
+        asyncio.run_coroutine_threadsafe(
+            session.send_realtime_input(text=prompt),
+            loop
+        )
+        call_state["transcriptLines"].append(f"💬 [幕後耳語提示]：{text}")
+        _broadcast_to_monitors(call_state, {
+            "type": "transcript",
+            "lines": list(call_state["transcriptLines"])
+        })
+
+
+def _send_takeover_audio_to_twilio(call_state: dict, pcm16k_bytes: bytes):
+    """將店主瀏覽器麥克風音訊即時轉發給電話另一端的店員（真人插話接管）。"""
+    twilio_ws = call_state.get("twilio_ws")
+    stream_sid = call_state.get("stream_sid")
+    if twilio_ws and stream_sid:
+        ulaw = pcm16_16k_to_ulaw_8k(pcm16k_bytes)
+        if ulaw:
+            b64_payload = base64.b64encode(ulaw).decode("ascii")
+            try:
+                twilio_ws.send(json.dumps({
+                    "event": "media",
+                    "streamSid": stream_sid,
+                    "media": {"payload": b64_payload}
+                }))
+            except Exception as e:
+                print(f"[Takeover Audio Send Error]: {e}")
+
+
+def whisper_ai_call(call_id: str, text: str) -> dict:
+    if not call_id or not text:
+        raise ValueError("缺少 callId 或 text 參數")
+    call_state = ACTIVE_CALLS.get(call_id)
+    if not call_state:
+        raise ValueError("找不到進行中的通話紀錄")
+    _inject_whisper(call_state, text)
+    return {"message": "耳語提示已送出"}
+
+
+def hangup_ai_call(call_id: str) -> dict:
+    if not call_id:
+        raise ValueError("缺少 callId 參數")
+    _emergency_hangup(call_id)
+    return {"message": "已手動掛斷通話"}
+
 def start_ai_phone_call(call_data: dict) -> dict:
     """使用 Twilio Programmable Voice 發起外撥電話，並將音訊串流導向本服務的 Gemini Live WebSocket。"""
     if not GEMINI_API_KEY:
@@ -448,6 +576,9 @@ def start_ai_phone_call(call_data: dict) -> dict:
         },
         "extractionDone": False,
         "createdAt": time.time(),
+        "monitors": set(),
+        "takeover_active": False,
+        "farewell_task_started": False,
     }
 
     # TwiML：電話一接通立即建立雙向 Media Stream 連回 Cloud Run 的 /twilio-media-stream/<call_id>
@@ -644,7 +775,7 @@ def twilio_media_stream(ws, call_id: str):
 
 
 async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
-    """在非同步事件迴圈中雙向轉發 Twilio WebSocket 與 Gemini Live Session。"""
+    """在非同步事件迴圈中雙向轉發 Twilio WebSocket 與 Gemini Live Session，並支援即時旁聽與耳語介入。"""
     client = genai.Client(api_key=GEMINI_API_KEY)
     config = _build_live_config(call_state["systemPrompt"], call_state.get("voiceName", ""))
 
@@ -653,8 +784,16 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
     watcher = SilenceWatcher()
     loop = asyncio.get_running_loop()
 
+    call_state["session"] = None
+    call_state["twilio_ws"] = ws
+    call_state["stop_event"] = stop_event
+    call_state["loop"] = loop
+    call_state["watcher"] = watcher
+
     async with client.aio.live.connect(model=GEMINI_LIVE_MODEL, config=config) as session:
-        # 1. 背景任務：接收來自 Gemini Live 的語音與逐字稿，轉成 8kHz μ-law 送回 Twilio
+        call_state["session"] = session
+
+        # 1. 背景任務：接收來自 Gemini Live 的語音與逐字稿，轉成 8kHz μ-law 送回 Twilio 並廣播至監聽端點
         async def receive_from_gemini():
             nonlocal stream_sid
             ai_text_buffer = ""
@@ -671,7 +810,17 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
                     if content.model_turn:
                         for part in content.model_turn.parts:
                             if part.inline_data and part.inline_data.data and stream_sid:
+                                # 若真人接管中，暫停將 AI 聲音送給店員
+                                if call_state.get("takeover_active"):
+                                    continue
                                 watcher.on_audio_out(len(part.inline_data.data))
+                                # 廣播 AI 聲音至網頁監聽端
+                                _broadcast_to_monitors(call_state, {
+                                    "type": "audio",
+                                    "who": "ai",
+                                    "data": base64.b64encode(part.inline_data.data).decode("ascii"),
+                                    "sampleRate": 24000
+                                })
                                 ulaw_bytes = pcm16_24k_to_ulaw_8k(part.inline_data.data)
                                 if ulaw_bytes:
                                     b64_payload = base64.b64encode(ulaw_bytes).decode("ascii")
@@ -695,21 +844,84 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
                         if user_text_buffer.endswith(("。", "？", "！", "\n")) or len(user_text_buffer) > 25:
                             call_state["transcriptLines"].append(f"👩‍🍳 店員：{user_text_buffer.strip()}")
                             user_text_buffer = ""
+                            _broadcast_to_monitors(call_state, {
+                                "type": "transcript",
+                                "lines": list(call_state["transcriptLines"])
+                            })
 
                     if content.output_transcription and content.output_transcription.text:
                         ai_text_buffer += content.output_transcription.text
                         if ai_text_buffer.endswith(("。", "？", "！", "\n")) or len(ai_text_buffer) > 30:
                             call_state["transcriptLines"].append(f"🤖 AI：{ai_text_buffer.strip()}")
                             ai_text_buffer = ""
+                            _broadcast_to_monitors(call_state, {
+                                "type": "transcript",
+                                "lines": list(call_state["transcriptLines"])
+                            })
 
                     if content.turn_complete:
                         watcher.on_turn_complete()
+                        # 【網頁實測道別後 4 秒自動結束通話判定】
+                        if not call_state.get("farewell_task_started"):
+                            ai_all = " ".join([l for l in lines if "AI" in l]) + " " + buffers["ai"]
+                            if re.search(r"(?:謝謝|感謝).*(?:拜拜|掰掰|再見)", ai_all) or ("待會過去拿" in ai_all and "拜拜" in ai_all):
+                                call_state["farewell_task_started"] = True
+                                print(f"[Voice Test Auto Hangup]: Farewell detected. Auto hanging up 4s after audio finishes.")
+                                try:
+                                    ws.send(json.dumps({"type": "notice", "text": "⏱️ AI 已道別，若無其他發言將於 4 秒後自動結算..."}))
+                                except Exception:
+                                    pass
+                                async def _vt_auto_hangup():
+                                    while time.time() < watcher.play_end:
+                                        await asyncio.sleep(0.2)
+                                    wait_end = time.time() + 4.0
+                                    while time.time() < wait_end:
+                                        if stop_event.is_set():
+                                            return
+                                        await asyncio.sleep(0.2)
+                                    print(f"[Voice Test Auto Hangup Triggered]: Closing session.")
+                                    stop_event.set()
+                                asyncio.create_task(_vt_auto_hangup())
                         if user_text_buffer.strip():
                             call_state["transcriptLines"].append(f"👩‍🍳 店員：{user_text_buffer.strip()}")
                             user_text_buffer = ""
                         if ai_text_buffer.strip():
                             call_state["transcriptLines"].append(f"🤖 AI：{ai_text_buffer.strip()}")
                             ai_text_buffer = ""
+                        _broadcast_to_monitors(call_state, {
+                            "type": "transcript",
+                            "lines": list(call_state["transcriptLines"])
+                        })
+
+                        # 【道別後 4 秒自動掛斷判定】
+                        if not call_state.get("farewell_task_started"):
+                            ai_all = " ".join([l for l in call_state["transcriptLines"] if "AI" in l])
+                            if re.search(r"(?:謝謝|感謝).*(?:拜拜|掰掰|再見)", ai_all) or ("待會過去拿" in ai_all and "拜拜" in ai_all):
+                                call_state["farewell_task_started"] = True
+                                print(f"[Auto Hangup]: Farewell detected for {call_state.get('callId')}. Auto hanging up 4s after audio finishes.")
+                                _broadcast_to_monitors(call_state, {
+                                    "type": "notice",
+                                    "text": "⏱️ AI 已道別，若店員無其他發言將於 4 秒後自動掛斷..."
+                                })
+                                async def _auto_hangup():
+                                    while time.time() < watcher.play_end:
+                                        await asyncio.sleep(0.2)
+                                    wait_end = time.time() + 4.0
+                                    while time.time() < wait_end:
+                                        if stop_event.is_set():
+                                            return
+                                        await asyncio.sleep(0.2)
+                                    print(f"[Auto Hangup Triggered]: Hanging up call {call_state.get('callId')}")
+                                    _broadcast_to_monitors(call_state, {
+                                        "type": "notice",
+                                        "text": "✅ 對話完成，系統自動掛斷電話。"
+                                    })
+                                    sid = call_state.get("twilioCallSid")
+                                    if sid:
+                                        _hangup_twilio_call(sid)
+                                    stop_event.set()
+                                asyncio.create_task(_auto_hangup())
+
             except Exception as e:
                 print(f"[Gemini Live Receive Loop Closed]: {e}")
             finally:
@@ -719,7 +931,7 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
                     call_state["transcriptLines"].append(f"🤖 AI：{ai_text_buffer.strip()}")
                 stop_event.set()
 
-        # 2. 背景任務：從 Twilio WebSocket 讀取音訊事件 (8kHz μ-law -> 16kHz PCM) 送進 Gemini Live
+        # 2. 背景任務：從 Twilio WebSocket 讀取音訊事件 (8kHz μ-law -> 16kHz PCM) 送進 Gemini Live 並廣播至監聽端
         async def receive_from_twilio():
             nonlocal stream_sid
             try:
@@ -732,16 +944,29 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
 
                     if event_type == "start":
                         stream_sid = msg.get("start", {}).get("streamSid")
-                        # 電話接通後，觸發 AI 主動開口跟店員打招呼
+                        call_state["stream_sid"] = stream_sid
+                        # 電話接通後，親切開場並詢問同意後停頓等店員回應
                         await session.send_realtime_input(
-                            text="（電話已接通，請立刻主動向店員打招呼，說明要訂飲料自取，並開始唸第一個品項）"
+                            text="（電話已接通，請親切向店員打招呼說明要訂自取飲料，詢問是否方便慢慢唸給他聽，並停下來等店員回答）"
                         )
+                        _broadcast_to_monitors(call_state, {
+                            "type": "status",
+                            "status": "in-progress",
+                            "message": "電話已接通！AI 正在開始點餐..."
+                        })
                     elif event_type == "media":
                         b64_audio = msg.get("media", {}).get("payload")
                         if b64_audio:
                             ulaw_bytes = base64.b64decode(b64_audio)
                             pcm16k_bytes = ulaw_8k_to_pcm16_16k(ulaw_bytes)
                             watcher.on_clerk_chunk(pcm16k_bytes)
+                            # 廣播店員音訊至網頁監聽端
+                            _broadcast_to_monitors(call_state, {
+                                "type": "audio",
+                                "who": "clerk",
+                                "data": base64.b64encode(pcm16k_bytes).decode("ascii"),
+                                "sampleRate": 16000
+                            })
                             await session.send_realtime_input(
                                 audio=types.Blob(
                                     data=pcm16k_bytes,
@@ -917,6 +1142,75 @@ def extract_pickup_info_with_gemini(call_id: str):
 #   server -> client: {"type":"ready"} / {"type":"audio","data":<b64 PCM16 24k>} / {"type":"interrupted"}
 #                     {"type":"transcript","lines":[...]} / {"type":"ended","summary":..,"pickupInfo":{..},"transcript":..}
 # ==========================================
+@sock.route("/call-monitor-stream/<call_id>")
+def call_monitor_stream(ws, call_id: str):
+    """提供網頁端即時旁聽 Twilio 電話語音、接收即時逐字稿與進行耳語/插話介入的 WebSocket 端點。"""
+    call_state = ACTIVE_CALLS.get(call_id)
+    if not call_state:
+        ws.send(json.dumps({"type": "error", "message": "找不到該通話或通話已結束"}))
+        ws.close()
+        return
+
+    if "monitors" not in call_state:
+        call_state["monitors"] = set()
+    call_state["monitors"].add(ws)
+
+    # 傳送初次握手狀態
+    try:
+        ws.send(
+            json.dumps(
+                {
+                    "type": "init",
+                    "callId": call_id,
+                    "shopName": call_state.get("shopName", ""),
+                    "status": call_state.get("status", "ringing"),
+                    "transcript": list(call_state.get("transcriptLines") or []),
+                }
+            )
+        )
+    except Exception:
+        pass
+
+    try:
+        while True:
+            raw = ws.receive()
+            if raw is None:
+                break
+            m = json.loads(raw)
+            t = m.get("type")
+            if t == "whisper":
+                text = (m.get("text") or "").strip()
+                if text:
+                    _inject_whisper(call_state, text)
+            elif t == "takeover_audio":
+                b64_pcm = m.get("data")
+                if b64_pcm:
+                    pcm_bytes = base64.b64decode(b64_pcm)
+                    _send_takeover_audio_to_twilio(call_state, pcm_bytes)
+            elif t == "takeover_start":
+                call_state["takeover_active"] = True
+                _inject_whisper(call_state, "（店主已手動切換真人接管發話，請保持安靜，暫勿插話）")
+                twilio_ws = call_state.get("twilio_ws")
+                stream_sid = call_state.get("stream_sid")
+                if twilio_ws and stream_sid:
+                    try:
+                        twilio_ws.send(json.dumps({"event": "clear", "streamSid": stream_sid}))
+                    except Exception:
+                        pass
+                _broadcast_to_monitors(call_state, {"type": "notice", "text": "🎙️ 真人接管中：您的麥克風聲音已直通電話！"})
+            elif t == "takeover_stop":
+                call_state["takeover_active"] = False
+                _inject_whisper(call_state, "（店主已交還 AI 控制權，請接續進行點餐確認流程）")
+                _broadcast_to_monitors(call_state, {"type": "notice", "text": "🤖 控制權已交還 AI。"})
+            elif t == "hangup":
+                _emergency_hangup(call_id)
+                break
+    except Exception as e:
+        print(f"[Call Monitor Loop Closed]: {e}")
+    finally:
+        call_state.get("monitors", set()).discard(ws)
+
+
 @sock.route("/voice-test-stream")
 def voice_test_stream(ws):
     """瀏覽器語音實測 WebSocket 入口。"""

@@ -301,3 +301,33 @@ textarea {
     padding: 2px 8px;
     border-radius: 999px;
 }
+
+/* 即時監聽與耳語提示 UI 樣式 */
+.whisper-chip {
+    background: #ffffff;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-weight: 500;
+}
+.whisper-chip:hover {
+    background: #3b82f6;
+    color: #ffffff;
+    border-color: #2563eb;
+    transform: translateY(-1px);
+}
+.whisper-chip:active {
+    transform: translateY(0);
+}
+@keyframes pulse-dot {
+    0% { transform: scale(0.95); opacity: 0.8; }
+    50% { transform: scale(1.15); opacity: 1; }
+    100% { transform: scale(0.95); opacity: 0.8; }
+}
+.status-pulse-dot {
+    animation: pulse-dot 1.5s infinite ease-in-out;
+}

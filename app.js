@@ -954,21 +954,372 @@ async function startAiPhoneCall() {
 
     try {
         const res = await apiPost("startAiPhoneCall", { callData: payload });
-        statusBox.innerHTML = `✅ 後端已透過 Twilio + Gemini Live 發起撥號！<br>🆔 通話 ID：<code>${escapeHtml(res.callId || "N/A")}</code><br>📞 目標號碼：<b>${escapeHtml(res.e164ShopPhone || shopPhone)}</b><br>⏳ 正在即時追蹤通話狀態...`;
         if (res.callId) {
-            pollAiCallStatus(res.callId);
+            startCallMonitor(res.callId, res.e164ShopPhone || shopPhone);
         } else {
+            statusBox.innerHTML = `⚠️ 撥號未傳回 callId：${escapeHtml(JSON.stringify(res))}`;
             startBtn.disabled = false;
             startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
         }
     } catch (e) {
-        statusBox.innerHTML = `⚠️ <b>無法發起真實撥號</b>：${escapeHtml(e.message)}<br>👉 請確認 Cloud Run 環境變數已設定 <code>GEMINI_API_KEY</code>、<code>TWILIO_ACCOUNT_SID</code>、<code>TWILIO_AUTH_TOKEN</code> 與 <code>TWILIO_FROM_NUMBER</code>，或先點擊上方的「🧪 模擬通話測試」預覽流程！`;
+        statusBox.innerHTML = `⚠️ <b>無法發起真實撥號</b>：${escapeHtml(e.message)}<br>👉 請確認 Cloud Run 環境變數已設定 <code>GEMINI_API_KEY</code>、<code>TWILIO_ACCOUNT_SID</code>、<code>TWILIO_AUTH_TOKEN</code> 與 <code>TWILIO_FROM_NUMBER</code>，或先點擊上方的「🎙️ 網頁語音實測」免電話費測試流程！`;
         startBtn.disabled = false;
         startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
     }
 }
 
+let monitorState = null;
 let aiCallPollTimer = null;
+
+function startCallMonitor(callId, shopPhone) {
+    if (aiCallPollTimer) clearTimeout(aiCallPollTimer);
+    cleanupCallMonitor();
+
+    const statusBox = document.getElementById("aiCallStatusBox");
+    const startBtn = document.getElementById("startAiCallBtn");
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.innerText = "📞 AI 正在通話中...";
+    }
+
+    statusBox.style.display = "block";
+    statusBox.innerHTML = `
+        <div class="monitor-container" style="background:#f8fafc; border:2px solid #3b82f6; border-radius:12px; padding:16px; margin-top:8px;">
+            <!-- 頂部列：狀態與控制按鈕 -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="status-pulse-dot" style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#22c55e;"></span>
+                    <b id="monitorTitle" style="font-size:16px; color:#1e293b;">📞 正在撥打門市（${escapeHtml(shopPhone)}）...</b>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" id="monitorAudioBtn" class="btn" style="padding:6px 12px; font-size:13px; background:#0284c7; color:#fff;" onclick="toggleMonitorMute()">
+                        🎧 監聽中（點擊靜音）
+                    </button>
+                    <button type="button" class="btn" style="padding:6px 12px; font-size:13px; background:#ef4444; color:#fff; font-weight:bold;" onclick="triggerEmergencyHangup('${callId}')">
+                        🛑 緊急掛斷
+                    </button>
+                </div>
+            </div>
+
+            <!-- 音量動態與說話者標籤 -->
+            <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+                <span style="font-size:12px; color:#64748b; font-weight:bold;">通話音訊：</span>
+                <div style="flex:1; height:8px; background:#e2e8f0; border-radius:4px; overflow:hidden;">
+                    <div id="monitorMeter" style="height:100%; width:0%; background:#3b82f6; transition:width 0.08s linear;"></div>
+                </div>
+                <span id="monitorSpeakerTag" style="font-size:12px; color:#2563eb; font-weight:bold;">連線中...</span>
+            </div>
+
+            <!-- 即時逐字稿 -->
+            <div id="monitorTranscript" style="margin-top:10px; height:180px; overflow-y:auto; background:#ffffff; border:1px solid #cbd5e1; border-radius:8px; padding:10px; font-size:13px; line-height:1.6; white-space:pre-wrap;">
+                <span style="color:#94a3b8;">⏳ 等待電話接通並載入對話...</span>
+            </div>
+
+            <!-- 介入控制 1：耳語提示 AI（Whisper Prompt） -->
+            <div style="margin-top:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px;">
+                <div style="font-size:13px; font-weight:bold; color:#1e40af; margin-bottom:8px;">
+                    💬 即時耳語提示 AI（AI 會用完全相同的聲音口氣跟店員改單/補充，不穿幫）：
+                </div>
+                <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '改點波霸')">🏷️ 改點波霸</button>
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '改點椰果')">🏷️ 改點椰果</button>
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '載具不用，直接印發票')">🏷️ 載具不用，印發票</button>
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '改成半糖微冰')">🏷️ 改成半糖微冰</button>
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '請店員稍等一下')">🏷️ 請店員稍等一下</button>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="customWhisperInput" placeholder="輸入自訂指令提示 AI（例：店員說珍珠賣完，改茶凍）" style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;" onkeydown="if(event.key==='Enter') sendCustomWhisperPrompt('${callId}')">
+                    <button type="button" class="btn" style="padding:6px 14px; background:#2563eb; color:#fff; font-size:13px;" onclick="sendCustomWhisperPrompt('${callId}')">傳送提示</button>
+                </div>
+            </div>
+
+            <!-- 介入控制 2：真人插話接管 (Voice Takeover) -->
+            <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; padding:10px 14px;">
+                <div>
+                    <b style="font-size:13px; color:#c2410c;">🎙️ 人工插話接管（直接對電話講話）：</b>
+                    <div style="font-size:12px; color:#7c2d12; margin-top:2px;">點擊後 AI 立即靜音，由您對電腦麥克風說話，店員會直接聽見您的真人聲音。</div>
+                </div>
+                <button type="button" id="takeoverBtn" class="btn" style="padding:8px 16px; background:#ea580c; color:#fff; font-weight:bold; font-size:13px; white-space:nowrap;" onclick="toggleVoiceTakeover('${callId}')">
+                    🎙️ 開始人工接管
+                </button>
+            </div>
+        </div>
+    `;
+
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const outCtx = new AC({ sampleRate: 24000 });
+    const wsUrl = GAS_API_URL.replace(/^http/, "ws").replace(/\/$/, "") + "/call-monitor-stream/" + callId;
+    let ws;
+    try {
+        ws = new WebSocket(wsUrl);
+    } catch (e) {
+        console.warn("Monitor WebSocket error, fallback to polling:", e);
+        pollAiCallStatus(callId);
+        return;
+    }
+
+    const state = {
+        callId,
+        ws,
+        outCtx,
+        muted: false,
+        nextTime: 0,
+        sources: new Set(),
+        takingOver: false,
+        takeoverStream: null,
+        takeoverProc: null,
+        takeoverCtx: null
+    };
+    monitorState = state;
+
+    ws.onmessage = (ev) => {
+        try {
+            const m = JSON.parse(ev.data);
+            handleMonitorMessage(state, m);
+        } catch (e) {
+            console.error("Monitor msg parse error:", e);
+        }
+    };
+
+    ws.onerror = (e) => {
+        console.warn("Monitor WS error, starting fallback poll:", e);
+        pollAiCallStatus(callId);
+    };
+
+    ws.onclose = () => {
+        console.log("Monitor WS closed.");
+    };
+}
+
+function handleMonitorMessage(state, m) {
+    const titleEl = document.getElementById("monitorTitle");
+    const tagEl = document.getElementById("monitorSpeakerTag");
+    const meterEl = document.getElementById("monitorMeter");
+
+    if (m.type === "init" || m.type === "status") {
+        if (m.status === "in-progress") {
+            if (titleEl) titleEl.innerText = `🗣️ AI 正在通話點餐中（${escapeHtml(m.shopName || "")}）`;
+        } else if (m.status === "ringing") {
+            if (titleEl) titleEl.innerText = `🔔 店家電話響鈴中...`;
+        }
+        if (m.transcript && Array.isArray(m.transcript)) {
+            renderMonitorTranscript(m.transcript);
+        }
+    } else if (m.type === "audio") {
+        if (!state.muted && m.data) {
+            playMonitorAudio(state, m.data, m.sampleRate || 24000);
+        }
+        if (tagEl) {
+            tagEl.innerText = m.who === "clerk" ? "👩‍🍳 店員講話中..." : "🤖 AI 應答中...";
+            tagEl.style.color = m.who === "clerk" ? "#d97706" : "#2563eb";
+        }
+        if (meterEl) {
+            meterEl.style.width = "75%";
+            setTimeout(() => { if (meterEl) meterEl.style.width = "5%"; }, 120);
+        }
+    } else if (m.type === "transcript") {
+        renderMonitorTranscript(m.lines);
+    } else if (m.type === "notice") {
+        const transcriptEl = document.getElementById("monitorTranscript");
+        if (transcriptEl) {
+            transcriptEl.innerHTML += `<div style="color:#059669; font-weight:bold; margin-top:6px;">${escapeHtml(m.text)}</div>`;
+            transcriptEl.scrollTop = transcriptEl.scrollHeight;
+        }
+    } else if (m.type === "ended") {
+        finishCallMonitor(m);
+    }
+}
+
+function renderMonitorTranscript(lines) {
+    const transcriptEl = document.getElementById("monitorTranscript");
+    if (!transcriptEl) return;
+    const text = (lines || []).join("\n");
+    transcriptEl.innerHTML = text ? escapeHtml(text) : '<span style="color:#94a3b8;">⏳ 等待對話語音串流...</span>';
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+function playMonitorAudio(state, b64, sampleRate) {
+    try {
+        state.outCtx.resume();
+        const raw = atob(b64);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        const pcm = new Int16Array(bytes.buffer);
+        const buf = state.outCtx.createBuffer(1, pcm.length, sampleRate);
+        const ch = buf.getChannelData(0);
+        for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768.0;
+        const node = state.outCtx.createBufferSource();
+        node.buffer = buf;
+        node.connect(state.outCtx.destination);
+        const now = state.outCtx.currentTime;
+        const start = Math.max(now, state.nextTime);
+        node.start(start);
+        state.nextTime = start + buf.duration;
+        state.sources.add(node);
+        node.onended = () => state.sources.delete(node);
+    } catch (e) {
+        console.warn("playMonitorAudio error:", e);
+    }
+}
+
+function toggleMonitorMute() {
+    if (!monitorState) return;
+    monitorState.muted = !monitorState.muted;
+    const btn = document.getElementById("monitorAudioBtn");
+    if (btn) {
+        if (monitorState.muted) {
+            btn.innerText = "🔇 靜音中（點擊開啟監聽）";
+            btn.style.background = "#64748b";
+        } else {
+            btn.innerText = "🎧 監聽中（點擊靜音）";
+            btn.style.background = "#0284c7";
+            monitorState.outCtx.resume();
+        }
+    }
+}
+
+function sendWhisperPrompt(callId, text) {
+    if (!text || !text.trim()) return;
+    const cleanText = text.trim();
+    if (monitorState && monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+        monitorState.ws.send(JSON.stringify({ type: "whisper", text: cleanText }));
+    } else {
+        apiPost("whisperAiCall", { callId, text: cleanText });
+    }
+    const transcriptEl = document.getElementById("monitorTranscript");
+    if (transcriptEl) {
+        transcriptEl.innerHTML += `<div style="color:#2563eb; font-weight:bold; margin-top:4px;">💬 [你已送出耳語提示]：${escapeHtml(cleanText)}</div>`;
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    }
+}
+
+function sendCustomWhisperPrompt(callId) {
+    const input = document.getElementById("customWhisperInput");
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) return;
+    sendWhisperPrompt(callId, text);
+    input.value = "";
+}
+
+async function toggleVoiceTakeover(callId) {
+    if (!monitorState) return;
+    const btn = document.getElementById("takeoverBtn");
+    if (!monitorState.takingOver) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+            });
+            const AC = window.AudioContext || window.webkitAudioContext;
+            const inCtx = new AC();
+            await inCtx.resume();
+            const src = inCtx.createMediaStreamSource(stream);
+            const proc = inCtx.createScriptProcessor(4096, 1, 1);
+            const ratio = inCtx.sampleRate / 16000;
+
+            proc.onaudioprocess = (e) => {
+                if (!monitorState || !monitorState.takingOver) return;
+                const input = e.inputBuffer.getChannelData(0);
+                const outLen = Math.floor(input.length / ratio);
+                const pcm = new Int16Array(outLen);
+                for (let i = 0; i < outLen; i++) {
+                    const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
+                    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                const b64 = btoa(String.fromCharCode(...new Uint8Array(pcm.buffer)));
+                if (monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+                    monitorState.ws.send(JSON.stringify({ type: "takeover_audio", data: b64 }));
+                }
+            };
+            src.connect(proc);
+            proc.connect(inCtx.destination);
+
+            monitorState.takingOver = true;
+            monitorState.takeoverStream = stream;
+            monitorState.takeoverProc = proc;
+            monitorState.takeoverCtx = inCtx;
+
+            if (monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+                monitorState.ws.send(JSON.stringify({ type: "takeover_start" }));
+            }
+            if (btn) {
+                btn.innerText = "🛑 停止接管（交還 AI 繼續）";
+                btn.style.background = "#dc2626";
+            }
+        } catch (e) {
+            alert("無法開啟麥克風接管通話: " + e.message);
+        }
+    } else {
+        stopVoiceTakeover();
+    }
+}
+
+function stopVoiceTakeover() {
+    if (!monitorState) return;
+    monitorState.takingOver = false;
+    try { monitorState.takeoverProc && monitorState.takeoverProc.disconnect(); } catch (e) {}
+    try { monitorState.takeoverStream && monitorState.takeoverStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    try { monitorState.takeoverCtx && monitorState.takeoverCtx.close(); } catch (e) {}
+    monitorState.takeoverProc = null;
+    monitorState.takeoverStream = null;
+    monitorState.takeoverCtx = null;
+
+    if (monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+        monitorState.ws.send(JSON.stringify({ type: "takeover_stop" }));
+    }
+    const btn = document.getElementById("takeoverBtn");
+    if (btn) {
+        btn.innerText = "🎙️ 開始人工接管";
+        btn.style.background = "#ea580c";
+    }
+}
+
+function triggerEmergencyHangup(callId) {
+    if (!confirm("確定要緊急強制掛斷通話嗎？")) return;
+    if (monitorState && monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+        monitorState.ws.send(JSON.stringify({ type: "hangup" }));
+    } else {
+        apiPost("hangupAiCall", { callId });
+    }
+}
+
+function finishCallMonitor(m) {
+    cleanupCallMonitor();
+    const statusBox = document.getElementById("aiCallStatusBox");
+    const startBtn = document.getElementById("startAiCallBtn");
+    if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
+    }
+
+    let html = `<div><b>✅ 通話已結束</b></div>`;
+    if (m.transcript) {
+        html += `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:200px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 完整逐字稿：</b>\n${escapeHtml(m.transcript)}</div>`;
+    }
+    if (m.summary) {
+        html += `<div style="margin-top:8px; color:#1e40af;"><b>💡 AI 通話摘要：</b>${escapeHtml(m.summary)}</div>`;
+    }
+    const p = m.pickupInfo || {};
+    if (p.totalAmount) document.getElementById("pickupTotalAmount").value = p.totalAmount;
+    if (p.pickupTime) document.getElementById("pickupTime").value = p.pickupTime;
+    if (p.bagInfo) document.getElementById("pickupBagInfo").value = p.bagInfo;
+    if (p.orderNotes) document.getElementById("pickupOrderNo").value = p.orderNotes;
+    savePickupInfo();
+
+    html += `<div style="margin-top:8px; color:#16a34a; font-weight:bold;">🎉 已自動從通話結果擷取取餐資訊並填入下方紀錄卡！</div>`;
+    if (statusBox) statusBox.innerHTML = html;
+}
+
+function cleanupCallMonitor() {
+    stopVoiceTakeover();
+    const state = monitorState;
+    monitorState = null;
+    if (state) {
+        try { state.sources.forEach(s => s.stop()); } catch (e) {}
+        try { state.outCtx && state.outCtx.close(); } catch (e) {}
+        try { state.ws && state.ws.close(); } catch (e) {}
+    }
+}
 
 async function pollAiCallStatus(callId) {
     if (aiCallPollTimer) clearTimeout(aiCallPollTimer);
@@ -1098,7 +1449,11 @@ async function toggleVoiceTest() {
         } else if (m.type === "interrupted") {
             vtClearPlayback(state);
         } else if (m.type === "transcript") {
-            vtRenderTranscript(m.lines);
+            state.lastLines = m.lines;
+            vtRenderTranscript(m.lines, state.lastNotice);
+        } else if (m.type === "notice") {
+            state.lastNotice = m.text;
+            vtRenderTranscript(state.lastLines || [], m.text);
         } else if (m.type === "analyzing") {
             btn.innerText = "⏳ 正在整理取餐明細...";
             statusBox.innerHTML = `<div><b>⏳ 通話已結束</b></div><div style="margin-top:8px; color:#1e40af;">🤖 AI 正在整理通話逐字稿並自動帶入總金額與取餐卡...</div>` +
@@ -1175,9 +1530,11 @@ function vtClearPlayback(state) {
     state.nextTime = 0;
 }
 
-function vtRenderTranscript(lines) {
+function vtRenderTranscript(lines, noticeText) {
     const statusBox = document.getElementById("aiCallStatusBox");
+    const noticeHtml = noticeText ? `<div style="margin-top:6px; color:#059669; font-weight:bold;">${escapeHtml(noticeText)}</div>` : "";
     statusBox.innerHTML = `<div><b>🟢 通話中（你是店員，對著麥克風說話）</b></div>` + VT_METER_HTML +
+        noticeHtml +
         `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:220px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 即時逐字稿：</b>\n${escapeHtml((lines || []).join("\n"))}</div>`;
 }
 
