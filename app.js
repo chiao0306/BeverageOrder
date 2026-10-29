@@ -1006,3 +1006,200 @@ async function pollAiCallStatus(callId) {
 
     aiCallPollTimer = setTimeout(() => pollAiCallStatus(callId), 3000);
 }
+
+
+// ==========================================
+// 🎙️ 網頁語音實測：用電腦麥克風直接跟 Gemini Live AI 對話（你扮演店員，免 Twilio 電話費）
+// ==========================================
+let vtState = null;
+
+function vtBuildPayload() {
+    return {
+        shopName: document.getElementById("aiShopName")?.value.trim() || activeShop || "飲料店",
+        shopPhone: document.getElementById("aiShopPhone")?.value.trim() || "",
+        callerPhone: document.getElementById("aiCallerPhone")?.value.trim() || "0912-345-678",
+        callerName: document.getElementById("aiCallerName")?.value.trim() || "陳先生",
+        totalCups: aiTotalCups,
+        estimatedPrice: aiEstimatedTotalPrice,
+        items: aiAggregatedItems,
+        spokenLines: buildSpokenDrinkLines(),
+        requirements: {
+            askPrice: document.getElementById("reqAskPrice")?.checked,
+            needBag: document.getElementById("reqNeedBag")?.checked,
+            askPickupTime: document.getElementById("reqAskPickupTime")?.checked,
+            customNotes: document.getElementById("aiCustomNotes")?.value.trim() || ""
+        }
+    };
+}
+
+async function toggleVoiceTest() {
+    if (vtState) { stopVoiceTest(); return; }
+
+    const btn = document.getElementById("voiceTestBtn");
+    const statusBox = document.getElementById("aiCallStatusBox");
+    statusBox.style.display = "block";
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+        statusBox.innerHTML = "⚠️ 此瀏覽器不支援麥克風（需 https 或 localhost）。";
+        return;
+    }
+
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+        });
+    } catch (e) {
+        statusBox.innerHTML = `⚠️ 無法使用麥克風：${escapeHtml(e.message)}（請允許瀏覽器麥克風權限）`;
+        return;
+    }
+
+    btn.innerText = "⏳ 連線 AI 中...";
+    statusBox.innerHTML = "🔌 正在連線 Cloud Run + Gemini Live...";
+
+    const wsUrl = GAS_API_URL.replace(/^http/, "ws").replace(/\/$/, "") + "/voice-test-stream";
+    const ws = new WebSocket(wsUrl);
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const inCtx = new AC();
+    const outCtx = new AC({ sampleRate: 24000 });
+    const state = { ws, stream, inCtx, outCtx, sources: new Set(), nextTime: 0, ready: false, ended: false, proc: null, src: null };
+    vtState = state;
+
+    ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "setup", callData: vtBuildPayload() }));
+    };
+
+    ws.onmessage = (ev) => {
+        const m = JSON.parse(ev.data);
+        if (m.type === "ready") {
+            state.ready = true;
+            btn.innerText = "⏹️ 結束通話（點擊掛斷）";
+            statusBox.innerHTML = "🟢 <b>已連線</b>！你現在是店員，請先說：「喂你好，" + escapeHtml(vtBuildPayload().shopName) + "」，AI 就會開始點餐。<br>💡 建議戴耳機避免回音。";
+            vtStartMic(state);
+        } else if (m.type === "audio") {
+            vtPlay(state, m.data);
+        } else if (m.type === "interrupted") {
+            vtClearPlayback(state);
+        } else if (m.type === "transcript") {
+            vtRenderTranscript(m.lines);
+        } else if (m.type === "error") {
+            statusBox.innerHTML = `⚠️ <b>語音實測錯誤</b>：${escapeHtml(m.message)}`;
+        } else if (m.type === "ended") {
+            state.ended = true;
+            vtFinish(m);
+        }
+    };
+
+    ws.onerror = () => {
+        statusBox.innerHTML = "⚠️ 無法連線至後端 WebSocket，請確認 Cloud Run 已部署最新版本。";
+    };
+    ws.onclose = () => {
+        if (vtState === state) vtCleanup();
+    };
+}
+
+function vtStartMic(state) {
+    state.src = state.inCtx.createMediaStreamSource(state.stream);
+    state.proc = state.inCtx.createScriptProcessor(4096, 1, 1);
+    const ratio = state.inCtx.sampleRate / 16000;
+    state.proc.onaudioprocess = (e) => {
+        if (state.ws.readyState !== WebSocket.OPEN || state.ended) return;
+        const input = e.inputBuffer.getChannelData(0);
+        const outLen = Math.floor(input.length / ratio);
+        const pcm = new Int16Array(outLen);
+        for (let i = 0; i < outLen; i++) {
+            const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
+            pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        const bytes = new Uint8Array(pcm.buffer);
+        let bin = "";
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        state.ws.send(JSON.stringify({ type: "audio", data: btoa(bin) }));
+    };
+    state.src.connect(state.proc);
+    state.proc.connect(state.inCtx.destination);
+}
+
+function vtPlay(state, b64) {
+    const bin = atob(b64);
+    const len = bin.length >> 1;
+    const f32 = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+        let v = bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8);
+        if (v >= 0x8000) v -= 0x10000;
+        f32[i] = v / 0x8000;
+    }
+    const buf = state.outCtx.createBuffer(1, len, 24000);
+    buf.copyToChannel(f32, 0);
+    const node = state.outCtx.createBufferSource();
+    node.buffer = buf;
+    node.connect(state.outCtx.destination);
+    const startAt = Math.max(state.outCtx.currentTime + 0.02, state.nextTime);
+    node.start(startAt);
+    state.nextTime = startAt + buf.duration;
+    state.sources.add(node);
+    node.onended = () => state.sources.delete(node);
+}
+
+function vtClearPlayback(state) {
+    state.sources.forEach(n => { try { n.stop(); } catch (e) { /* ignore */ } });
+    state.sources.clear();
+    state.nextTime = 0;
+}
+
+function vtRenderTranscript(lines) {
+    const statusBox = document.getElementById("aiCallStatusBox");
+    statusBox.innerHTML = `<div><b>🟢 通話中（你是店員，對著麥克風說話）</b></div>` +
+        `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:220px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 即時逐字稿：</b>\n${escapeHtml((lines || []).join("\n"))}</div>`;
+}
+
+function stopVoiceTest() {
+    const state = vtState;
+    if (!state) return;
+    const btn = document.getElementById("voiceTestBtn");
+    btn.innerText = "⏳ 整理通話結果中...";
+    btn.disabled = true;
+    if (state.proc) { try { state.proc.disconnect(); } catch (e) { /* ignore */ } }
+    state.stream.getTracks().forEach(t => t.stop());
+    vtClearPlayback(state);
+    if (state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: "end" }));
+    } else {
+        vtCleanup();
+    }
+}
+
+function vtFinish(m) {
+    const statusBox = document.getElementById("aiCallStatusBox");
+    let html = `<div><b>✅ 語音實測結束</b></div>`;
+    if (m.transcript) {
+        html += `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:220px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 完整逐字稿：</b>\n${escapeHtml(m.transcript)}</div>`;
+    }
+    if (m.summary) html += `<div style="margin-top:8px; color:#1e40af;"><b>💡 AI 通話摘要：</b>${escapeHtml(m.summary)}</div>`;
+    const p = m.pickupInfo || {};
+    if (p.totalAmount) document.getElementById("pickupTotalAmount").value = p.totalAmount;
+    if (p.pickupTime) document.getElementById("pickupTime").value = p.pickupTime;
+    if (p.bagInfo) document.getElementById("pickupBagInfo").value = p.bagInfo;
+    if (p.orderNotes) document.getElementById("pickupOrderNo").value = p.orderNotes;
+    savePickupInfo();
+    if (p.totalAmount || p.pickupTime) html += `<div style="margin-top:8px; color:#16a34a; font-weight:bold;">🎉 已自動擷取取餐資訊並填入下方紀錄卡！</div>`;
+    statusBox.innerHTML = html;
+    vtCleanup();
+}
+
+function vtCleanup() {
+    const state = vtState;
+    vtState = null;
+    if (state) {
+        try { state.proc && state.proc.disconnect(); } catch (e) { /* ignore */ }
+        try { state.stream.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ }
+        try { state.inCtx.close(); } catch (e) { /* ignore */ }
+        try { state.outCtx.close(); } catch (e) { /* ignore */ }
+        try { state.ws.close(); } catch (e) { /* ignore */ }
+    }
+    const btn = document.getElementById("voiceTestBtn");
+    if (btn) {
+        btn.disabled = false;
+        btn.innerText = "🎙️ 網頁語音實測（我扮演店員，免電話費）";
+    }
+}

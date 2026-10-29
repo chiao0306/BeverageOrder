@@ -711,6 +711,179 @@ def extract_pickup_info_with_gemini(call_id: str):
         call_state["summary"] = f"自動摘要解析完成（{e}）"
 
 
+# ==========================================
+# 網頁語音實測：瀏覽器麥克風 <-> Cloud Run <-> Gemini Live（免 Twilio、免電話費）
+# 使用者扮演店員，AI 依訂單腳本與你對話；結束後自動擷取取餐資訊。
+# 協定（JSON 文字訊息）：
+#   client -> server: {"type":"setup","callData":{...}} / {"type":"audio","data":<b64 PCM16 16k>} / {"type":"end"}
+#   server -> client: {"type":"ready"} / {"type":"audio","data":<b64 PCM16 24k>} / {"type":"interrupted"}
+#                     {"type":"transcript","lines":[...]} / {"type":"ended","summary":..,"pickupInfo":{..},"transcript":..}
+# ==========================================
+@sock.route("/voice-test-stream")
+def voice_test_stream(ws):
+    """瀏覽器語音實測 WebSocket 入口。"""
+    try:
+        first = ws.receive(timeout=15)
+        msg = json.loads(first) if first else {}
+    except Exception:
+        ws.close()
+        return
+    if msg.get("type") != "setup":
+        ws.close()
+        return
+    if not GEMINI_API_KEY:
+        ws.send(json.dumps({"type": "error", "message": "後端尚未設定 GEMINI_API_KEY"}))
+        ws.close()
+        return
+
+    call_data = msg.get("callData") or {}
+    call_id = str(uuid.uuid4())
+    call_state = {
+        "callId": call_id,
+        "shopName": (call_data.get("shopName") or "飲料店").strip(),
+        "systemPrompt": build_beverage_system_prompt(call_data),
+        "status": "in-progress",
+        "transcriptLines": [],
+        "summary": "",
+        "pickupInfo": {},
+        "extractionDone": False,
+        "createdAt": time.time(),
+    }
+    ACTIVE_CALLS[call_id] = call_state
+
+    try:
+        asyncio.run(_bridge_browser_and_gemini_live(ws, call_state))
+    except Exception as e:
+        print(f"[Voice Test Error]: {type(e).__name__}: {e}")
+        try:
+            ws.send(json.dumps({"type": "error", "message": f"{type(e).__name__}: {e}"}))
+        except Exception:
+            pass
+
+    call_state["status"] = "ended"
+    extract_pickup_info_with_gemini(call_id)
+    try:
+        ws.send(
+            json.dumps(
+                {
+                    "type": "ended",
+                    "summary": call_state.get("summary", ""),
+                    "pickupInfo": call_state.get("pickupInfo") or {},
+                    "transcript": "\n".join(call_state.get("transcriptLines") or []),
+                }
+            )
+        )
+    except Exception:
+        pass
+    ACTIVE_CALLS.pop(call_id, None)
+
+
+async def _bridge_browser_and_gemini_live(ws, call_state: dict):
+    """雙向轉發瀏覽器麥克風音訊（16kHz PCM16）與 Gemini Live Session。"""
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    config = types.LiveConnectConfig(
+        response_modalities=[types.Modality.AUDIO],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=GEMINI_VOICE_NAME
+                )
+            )
+        ),
+        system_instruction=types.Content(
+            parts=[types.Part(text=call_state["systemPrompt"])]
+        ),
+        input_audio_transcription=types.AudioTranscriptionConfig(),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
+    )
+
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    lines = call_state["transcriptLines"]
+
+    async with client.aio.live.connect(model=GEMINI_LIVE_MODEL, config=config) as session:
+        ws.send(json.dumps({"type": "ready"}))
+
+        async def receive_from_gemini():
+            buffers = {"user": "", "ai": ""}
+            labels = {"user": "👩‍🍳 店員", "ai": "🤖 AI"}
+
+            def flush():
+                for who in ("user", "ai"):
+                    text = buffers[who].strip()
+                    if text:
+                        lines.append(f"{labels[who]}：{text}")
+                        buffers[who] = ""
+                try:
+                    ws.send(json.dumps({"type": "transcript", "lines": list(lines)}))
+                except Exception:
+                    pass
+
+            try:
+                async for response in session.receive():
+                    if stop_event.is_set():
+                        break
+                    content = response.server_content
+                    if not content:
+                        continue
+                    if content.model_turn:
+                        for part in content.model_turn.parts:
+                            if part.inline_data and part.inline_data.data:
+                                ws.send(
+                                    json.dumps(
+                                        {
+                                            "type": "audio",
+                                            "data": base64.b64encode(
+                                                part.inline_data.data
+                                            ).decode("ascii"),
+                                        }
+                                    )
+                                )
+                    if content.interrupted is True:
+                        ws.send(json.dumps({"type": "interrupted"}))
+                    if content.input_transcription and content.input_transcription.text:
+                        buffers["user"] += content.input_transcription.text
+                    if content.output_transcription and content.output_transcription.text:
+                        buffers["ai"] += content.output_transcription.text
+                    if content.turn_complete or content.interrupted is True:
+                        flush()
+            except Exception as e:
+                print(f"[Voice Test Gemini Loop Closed]: {e}")
+            finally:
+                flush()
+                stop_event.set()
+
+        async def receive_from_browser():
+            try:
+                while not stop_event.is_set():
+                    raw = await loop.run_in_executor(None, ws.receive)
+                    if raw is None:
+                        break
+                    m = json.loads(raw)
+                    t = m.get("type")
+                    if t == "audio" and m.get("data"):
+                        await session.send_realtime_input(
+                            audio=types.Blob(
+                                data=base64.b64decode(m["data"]),
+                                mime_type="audio/pcm;rate=16000",
+                            )
+                        )
+                    elif t == "end":
+                        break
+            except Exception as e:
+                print(f"[Voice Test Browser Loop Closed]: {e}")
+            finally:
+                stop_event.set()
+
+        gemini_task = asyncio.ensure_future(receive_from_gemini())
+        browser_task = asyncio.ensure_future(receive_from_browser())
+        await stop_event.wait()
+        # 給 Gemini 迴圈片刻收尾；不等待 blocking 的 ws.receive 執行緒
+        await asyncio.wait({gemini_task}, timeout=2)
+        gemini_task.cancel()
+        browser_task.cancel()
+
+
 def get_ai_call_status(call_id: str) -> dict:
     """回傳目前通話狀態、即時逐字稿與 Gemini 整理後的取餐資訊。"""
     if not call_id:
