@@ -578,6 +578,17 @@ class SilenceWatcher:
         self.nudges += 1
 
 
+async def _receive_forever(session, stop_event: asyncio.Event):
+    """session.receive() 在每次 turn_complete 後就會結束，這裡持續重新接收直到通話結束。"""
+    while not stop_event.is_set():
+        got_message = False
+        async for response in session.receive():
+            got_message = True
+            yield response
+        if not got_message:
+            break  # 連線已關閉，避免空轉
+
+
 async def _silence_watch_loop(session, watcher: SilenceWatcher, stop_event: asyncio.Event):
     while not stop_event.is_set():
         await asyncio.sleep(0.5)
@@ -628,7 +639,7 @@ async def _bridge_twilio_and_gemini_live(ws, call_state: dict):
             ai_text_buffer = ""
             user_text_buffer = ""
             try:
-                async for response in session.receive():
+                async for response in _receive_forever(session, stop_event):
                     if stop_event.is_set():
                         break
                     content = response.server_content
@@ -881,7 +892,7 @@ async def _bridge_browser_and_gemini_live(ws, call_state: dict):
                     pass
 
             try:
-                async for response in session.receive():
+                async for response in _receive_forever(session, stop_event):
                     if stop_event.is_set():
                         break
                     content = response.server_content
