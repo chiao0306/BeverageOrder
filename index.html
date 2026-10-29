@@ -155,6 +155,17 @@
                     <label for="aiCallerName">取餐人稱呼（選填）：</label>
                     <input type="text" id="aiCallerName" placeholder="例如：陳先生 / 手銲股" value="陳先生" oninput="updateAiScriptPreview(); savePickupInfo();">
                 </div>
+                <div class="form-group">
+                    <label for="aiVoiceSelect">🎙️ AI 說話聲音 / 性別：</label>
+                    <select id="aiVoiceSelect" onchange="updateAiScriptPreview(); savePickupInfo();">
+                        <option value="Aoede" selected>👩 Aoede（親切甜美女聲 - 預設）</option>
+                        <option value="Kore">👩 Kore（自信俐落女聲）</option>
+                        <option value="Puck">👨 Puck（陽光自然男聲）</option>
+                        <option value="Charon">👨 Charon（沉穩成熟男聲）</option>
+                        <option value="Fenrir">👨 Fenrir（活力熱情男聲）</option>
+                    </select>
+                    <div class="field-hint">💡 可切換男聲或女聲，AI 會適配人設並在整通電話維持同一位說話者聲音。</div>
+                </div>
             </div>
 
             <!-- 3. 訂購需求設定 -->
