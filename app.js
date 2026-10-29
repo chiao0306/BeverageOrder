@@ -1012,6 +1012,7 @@ async function pollAiCallStatus(callId) {
 // 🎙️ 網頁語音實測：用電腦麥克風直接跟 Gemini Live AI 對話（你扮演店員，免 Twilio 電話費）
 // ==========================================
 let vtState = null;
+const VT_METER_HTML = `<div style="margin-top:6px; font-size:12px;">🎤 麥克風音量（講話時應會跳動）：<div style="height:8px; background:#e2e8f0; border-radius:4px;"><div id="vtMeter" style="height:8px; width:0; background:#16a34a; border-radius:4px;"></div></div></div>`;
 
 function vtBuildPayload() {
     return {
@@ -1074,7 +1075,7 @@ async function toggleVoiceTest() {
         if (m.type === "ready") {
             state.ready = true;
             btn.innerText = "⏹️ 結束通話（點擊掛斷）";
-            statusBox.innerHTML = "🟢 <b>已連線</b>！你現在是店員，請先說：「喂你好，" + escapeHtml(vtBuildPayload().shopName) + "」，AI 就會開始點餐。<br>💡 建議戴耳機避免回音。";
+            statusBox.innerHTML = "🟢 <b>已連線</b>！你現在是店員，請先說：「喂你好，" + escapeHtml(vtBuildPayload().shopName) + "」，AI 就會開始點餐。<br>💡 建議戴耳機避免回音。" + VT_METER_HTML;
             vtStartMic(state);
         } else if (m.type === "audio") {
             vtPlay(state, m.data);
@@ -1099,6 +1100,9 @@ async function toggleVoiceTest() {
 }
 
 function vtStartMic(state) {
+    // Chrome 可能因非同步建立而讓 AudioContext 處於 suspended，必須 resume 才會有麥克風資料
+    state.inCtx.resume();
+    state.outCtx.resume();
     state.src = state.inCtx.createMediaStreamSource(state.stream);
     state.proc = state.inCtx.createScriptProcessor(4096, 1, 1);
     const ratio = state.inCtx.sampleRate / 16000;
@@ -1111,6 +1115,10 @@ function vtStartMic(state) {
             const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
             pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
         }
+        let peak = 0;
+        for (let i = 0; i < input.length; i += 16) peak = Math.max(peak, Math.abs(input[i]));
+        const meter = document.getElementById("vtMeter");
+        if (meter) meter.style.width = Math.min(100, Math.round(peak * 300)) + "%";
         const bytes = new Uint8Array(pcm.buffer);
         let bin = "";
         for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
@@ -1149,7 +1157,7 @@ function vtClearPlayback(state) {
 
 function vtRenderTranscript(lines) {
     const statusBox = document.getElementById("aiCallStatusBox");
-    statusBox.innerHTML = `<div><b>🟢 通話中（你是店員，對著麥克風說話）</b></div>` +
+    statusBox.innerHTML = `<div><b>🟢 通話中（你是店員，對著麥克風說話）</b></div>` + VT_METER_HTML +
         `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:220px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 即時逐字稿：</b>\n${escapeHtml((lines || []).join("\n"))}</div>`;
 }
 
