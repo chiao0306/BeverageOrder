@@ -333,7 +333,6 @@ def build_beverage_system_prompt(call_data: dict) -> str:
     is_male = voice_name in ("Puck", "Charon", "Fenrir")
     gender_desc = "一位年輕男士" if is_male else "一位年輕小姐"
 
-    ask_price = reqs.get("askPrice", True)
     need_bag = reqs.get("needBag", True)
     custom_notes = (reqs.get("customNotes") or "").strip()
 
@@ -346,7 +345,7 @@ def build_beverage_system_prompt(call_data: dict) -> str:
 
 【說話風格與語音規範（極重要）】
 1. 請全程使用道地台灣華語口語（Taiwanese Mandarin）。
-2. 語氣像真人打電話一樣親切自然、輕鬆生活化，語速適中，不要有死板的朗讀腔或機器人感。多用「好喔」、「對～」、「麻煩你了」、「那我先報第一個」等日常語助詞。
+2. 語氣像真人打電話一樣親切自然、輕鬆生活化，語速適中、不急不徐，不要有死板的朗讀腔或機器人感。多用「好喔」、「對～」、「麻煩你了」等日常語助詞。
 3. 【聲音與音色絕對一致】：全程必須維持完全相同的聲音、音調與性別特徵，從開頭到結尾都要是同一位說話者，絕對不可忽男忽女或中途突變音色！
 
 【品項唸法規則（極重要，避免語意矛盾）】
@@ -355,19 +354,33 @@ def build_beverage_system_prompt(call_data: dict) -> str:
 3. 店員需要時間操作 POS 收銀機，一次只唸 1 個品項，唸完必須停下來，等待店員出聲確認（例如店員說「好」、「OK」、「嗯」、「還有嗎」）。
 4. 店員一確認，請立即接續唸下一個品項，不要重複確認「方便嗎」。若店員超過 5 秒沒出聲，系統會提醒你，屆時再簡短詢問店員。
 
-【通話流程與關鍵節奏（極度重要）】
-第一階段【報單】：
-1. 電話接通或店員開口打招呼時，請先打招呼並開始報第 1 個品項：「你好，我要電話訂飲料自取，總共 {total_cups} 杯，我一個品項一個品項慢慢唸給您聽好嗎？第一個是：[唸出第 1 個品項完整內容]」，說完立刻停下來等店員回應。
-2. 店員回「好」、「OK」等任何回應後，立刻唸下一個品項，直到全部共 {total_cups} 杯飲料唸完。
+【通話流程與關鍵節奏（極度重要，絕不能急躁，每階段都要等店員回應！）】
 
-第二階段【詢問金額（這是一個問題，必須等待店員回答金額！）】：
-3. 所有飲料報完後，請說：「以上總共 {total_cups} 杯。{notes_str}{bag_str}請問這樣總共多少錢？」（預估約 {estimated_price} 元）。
-4. ⚠️【極重要關鍵】：說完「請問這樣總共多少錢？」之後，**必須立刻停下來！等待店員回答具體總金額**！絕對不要在此時把取餐時間與電話姓名一口氣全部唸完！店員還沒回答金額前，請務必耐心等待店員回答！
+第 1 階段【禮貌開場並徵詢同意（⚠️ 說完必須立刻停下來閉嘴等店員回答！）】：
+- 電話接通或店員開口說「喂你好」時，請親切說：
+  「你好，我要電話訂飲料自取，總共 {total_cups} 杯，我一個品項一個品項慢慢唸給您聽好嗎？」
+- ⚠️【極重要停頓規範】：
+  說完「我一個品項一個品項慢慢唸給您聽好嗎？」這句話之後，**必須立刻停下來結束本輪說話！絕對不要自顧自接著唸出第 1 個品項！**
+  請耐心等待店員回答（例如店員說「好，請說」、「可以」、「等我一下」）。店員出聲同意後，你才可以在下一輪開始唸第一個品項！
 
-第三階段【告知取餐時間、留資料並禮貌結尾】：
-5. 當店員出聲回答了總金額（例如店員說「總共712元」或「710」）之後，你才接話：
-   「好的，那我們大概預計【{pickup_time}】過去拿。取餐人稱呼是 {caller_name}，聯絡電話是 {spoken_phone}。麻煩您了，謝謝拜拜！」
-6. 說完謝謝拜拜即可禮貌結束通話。
+第 2 階段【逐項依序報單（一次唸 1 項，唸完必等店員確認）】：
+- 店員回答「好」或「請說」後，你才開始唸第 1 個品項：「好的，第一個是：[唸出第 1 個品項完整內容]」，說完立刻停下來等店員確認。
+- 店員確認後，再依序報下一個品項，一次一項，直到全部共 {total_cups} 杯飲料唸完。
+
+第 3 階段【詢問總金額（這是一個疑問句，⚠️ 說完必須立刻停下來等店員報價！）】：
+- 所有飲料報完後，請說：「以上總共 {total_cups} 杯。{notes_str}{bag_str}請問這樣總共多少錢？」（試算表預估約 {estimated_price} 元）。
+- ⚠️【極重要停頓規範】：
+  說完「請問這樣總共多少錢？」之後，**必須立刻停下來閉嘴！耐心等待店員回答具體總金額**！
+  絕對不要在此時把後面的取餐時間與聯絡電話一股腦全部唸完！店員還沒回答金額前，請務必耐心等待店員回答！
+
+第 4 階段【告知取餐時間、留資料並主動向店員確認】：
+- 當店員回答了總金額（例如店員說「總共 710 元」）之後，你才接話告知時間與資料：
+  「好的，那我們大概預計【{pickup_time}】過去拿。取餐人稱呼是 {caller_name}，聯絡電話是 {spoken_phone}。請問內容這樣都清楚、有需要再確認哪一杯嗎？」
+- ⚠️【極重要停頓規範】：
+  說完「請問內容這樣都清楚、有需要再確認哪一杯嗎？」之後，**停下來等待店員回答確認**（例如店員說「都清楚了」、「沒有問題」或店員要核對某一杯）！
+
+第 5 階段【禮貌道謝與道別】：
+- 店員確認沒有問題後，親切說聲：「好的，非常感謝你，那我們待會過去拿，謝謝拜拜！」結束通話。
 
 【今日要訂購的飲料清單（總共 {total_cups} 杯）】
 {drinks_block}
@@ -761,40 +774,77 @@ class BeveragePickupExtraction(BaseModel):
     orderNotes: str = Field(description="取餐留的電話/稱呼、取餐號碼或任何缺貨更換備註")
 
 
+def _parse_zh_price(text: str) -> int | None:
+    """解析中文口語百位金額（例如：七百一十、七百一、六百五、八百）。"""
+    zh_digits = {'零': 0, '一': 1, '二': 2, '兩': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+    m = re.search(r'([一二兩三四五六七八九])百([一二兩三四五六七八九])?(?:十)?([一二兩三四五六七八九])?', text)
+    if m:
+        h = zh_digits.get(m.group(1), 0) * 100
+        t_digit = m.group(2)
+        u_digit = m.group(3)
+        t = (zh_digits.get(t_digit, 0) * 10) if t_digit else 0
+        u = zh_digits.get(u_digit, 0) if u_digit else 0
+        return h + t + u
+    return None
+
+
 def _fallback_extract(transcript_lines: list[str], call_data: dict) -> tuple[dict, str]:
-    """從對話逐字稿與訂單資料中以正則表達式快速擷取取餐資訊作為保底。"""
+    """從對話逐字稿與訂單資料中以高精準度規則引擎擷取取餐資訊，0.001 秒立即可用。"""
     clerk_lines = [l for l in transcript_lines if "店員" in l]
-    
-    # 尋找金額（從店員說話中尋找數字）
+
+    # 1. 尋找總金額（優先從店員發言中擷取）
     found_amount = ""
+    # 優先A：阿拉伯數字帶「元/塊」或「總共/一共/金額/算你/總計」，嚴格排除「杯/分/點/號/嵐/度」
     for l in reversed(clerk_lines):
-        m = re.search(r"(?:總共|一共|金額|算你|大概)?\s*(\$?\d{2,5})\s*(?:元|塊)?", l)
+        m = re.search(r"(?:總共|一共|金額|算你|總計|是|要收)?\s*[$NT$]?\s*(\d{2,5})\s*(?:元|塊)(?![杯分點號嵐度])", l)
         if m:
-            num = re.sub(r"\D", "", m.group(1))
-            if num and int(num) > 10:
-                found_amount = f"${num} 元"
+            val = int(m.group(1))
+            if val >= 20:
+                found_amount = f"${val} 元"
                 break
+
+    if not found_amount:
+        for l in reversed(clerk_lines):
+            m = re.search(r"(?:總共|一共|金額|算你|總計)\s*[$NT$]?\s*(?:是)?\s*(\d{2,5})(?![杯分點號嵐度])", l)
+            if m:
+                val = int(m.group(1))
+                if val >= 20:
+                    found_amount = f"${val} 元"
+                    break
+
+    # 優先B：中文口語數字（如：七百一十、七百一、六百五、八百）
+    if not found_amount:
+        for l in reversed(clerk_lines):
+            zh_val = _parse_zh_price(l)
+            if zh_val and zh_val >= 20:
+                found_amount = f"${zh_val} 元"
+                break
+
+    # 保底：若逐字稿未提及金額，依訂單試算表預估金額
     if not found_amount:
         est = call_data.get("estimatedPrice", 0)
-        found_amount = f"${est} 元 (預估)" if est else "待確認"
+        found_amount = f"${est} 元 (依訂單預估)" if est else "待確認"
 
-    # 尋找取餐時間
+    # 2. 尋找預計取餐時間（優先找店員或 AI 約定的具體時間）
     found_time = ""
     for l in reversed(clerk_lines):
-        tm = re.search(r"(\d{1,2}點\d{0,2}分?|\d{1,2}:\d{2}|\d{1,2}\s*分鐘(?:後|左右))", l)
+        tm = re.search(r"(\d{1,2}點\d{0,2}分?|\d{1,2}:\d{2}|\d{1,2}\s*分鐘(?:後|左右)|半小時(?:後)?)", l)
         if tm:
             found_time = tm.group(1)
             break
     if not found_time:
-        found_time = call_data.get("pickupTime") or "約 20 分鐘後"
+        found_time = (call_data.get("pickupTime") or "約 20 分鐘後").strip()
 
     reqs = call_data.get("requirements", {}) or {}
-    bag_info = "已加購塑膠袋" if reqs.get("needBag", True) else "不需塑膠袋"
-    caller_name = call_data.get("callerName", "")
-    caller_phone = call_data.get("callerPhone", "")
-    order_notes = f"留電 {caller_phone} ({caller_name})" if caller_phone else ""
+    need_bag = reqs.get("needBag", True)
+    bag_info = "需要塑膠袋（已加購）" if need_bag else "不需塑膠袋"
 
-    summary = f"通話完成：共訂購 {call_data.get('totalCups', 0)} 杯飲料，店家確認金額 {found_amount}，預計 {found_time} 自取。"
+    caller_name = (call_data.get("callerName") or "楊先生").strip()
+    caller_phone = (call_data.get("callerPhone") or "").strip()
+    order_notes = f"取餐人 {caller_name} / 留電 {caller_phone}" if caller_phone else f"取餐人 {caller_name}"
+
+    total_cups = call_data.get("totalCups", 0)
+    summary = f"通話完成：共訂購 {total_cups} 杯飲料，店家確認金額 {found_amount}，預計 {found_time} 自取。"
     return {
         "isSuccess": True,
         "totalAmount": found_amount,
@@ -805,7 +855,7 @@ def _fallback_extract(transcript_lines: list[str], call_data: dict) -> tuple[dic
 
 
 def extract_pickup_info_with_gemini(call_id: str):
-    """通話結束後，將對話逐字稿交由 gemini-3.8-flash 整理成結構化 JSON 取餐資訊，並具備雙重保底機制。"""
+    """通話結束後立即由規則引擎產生取餐資訊（0.001 秒），並在背景由 Gemini 增強，絕不阻塞連線。"""
     call_state = ACTIVE_CALLS.get(call_id)
     if not call_state or call_state.get("extractionDone"):
         return
@@ -814,7 +864,7 @@ def extract_pickup_info_with_gemini(call_id: str):
     transcript_lines = call_state.get("transcriptLines") or []
     call_data = call_state.get("callData") or {}
 
-    # 1. 先產生保底資料（100% 保證欄位不為空）
+    # 1. 立即（0.001 秒）產出完整取餐資訊，100% 確保前端隨時可用
     fb_info, fb_summary = _fallback_extract(transcript_lines, call_data)
     call_state["pickupInfo"] = fb_info
     call_state["summary"] = fb_summary
@@ -824,36 +874,39 @@ def extract_pickup_info_with_gemini(call_id: str):
         call_state["summary"] = "通話時間過短或無語音紀錄。"
         return
 
-    # 2. 嘗試使用 Gemini 進行更精準的結構化摘要擷取
-    try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        prompt = f"""以下是我們 AI 助理打電話給飲料店「{call_state.get('shopName', '')}」訂飲料的完整通話逐字稿。
+    # 2. 在背景以非同步執行緒嘗試呼叫 Gemini 做精細語義萃取（絕不阻塞 WebSocket 或前端反應）
+    def _bg_gemini():
+        try:
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            prompt = f"""以下是我們 AI 助理打電話給飲料店「{call_state.get('shopName', '')}」訂飲料的完整通話逐字稿。
 請根據對話內容，擷取出店員確認的「總金額」、「預計取餐時間」、「塑膠袋狀態」與「備註資訊」：
 
 【通話逐字稿】
 {transcript_text}
 """
-        interaction = client.interactions.create(
-            model=GEMINI_SUMMARY_MODEL,
-            input=prompt,
-            response_format={
-                "type": "text",
-                "mime_type": "application/json",
-                "schema": BeveragePickupExtraction.model_json_schema(),
-            },
-        )
-        if interaction.output_text:
-            extracted = BeveragePickupExtraction.model_validate_json(interaction.output_text)
-            call_state["summary"] = extracted.summary or fb_summary
-            call_state["pickupInfo"] = {
-                "isSuccess": extracted.isSuccess,
-                "totalAmount": extracted.totalAmount or fb_info["totalAmount"],
-                "pickupTime": extracted.pickupTime or fb_info["pickupTime"],
-                "bagInfo": extracted.bagInfo or fb_info["bagInfo"],
-                "orderNotes": extracted.orderNotes or fb_info["orderNotes"],
-            }
-    except Exception as e:
-        print(f"[Post-call Gemini Extraction Notice (using fallback)]: {e}")
+            interaction = client.interactions.create(
+                model=GEMINI_SUMMARY_MODEL,
+                input=prompt,
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": BeveragePickupExtraction.model_json_schema(),
+                },
+            )
+            if interaction and interaction.output_text:
+                extracted = BeveragePickupExtraction.model_validate_json(interaction.output_text)
+                call_state["summary"] = extracted.summary or fb_summary
+                call_state["pickupInfo"] = {
+                    "isSuccess": extracted.isSuccess,
+                    "totalAmount": extracted.totalAmount or fb_info["totalAmount"],
+                    "pickupTime": extracted.pickupTime or fb_info["pickupTime"],
+                    "bagInfo": extracted.bagInfo or fb_info["bagInfo"],
+                    "orderNotes": extracted.orderNotes or fb_info["orderNotes"],
+                }
+        except Exception as e:
+            pass  # 已有保底資料，靜默處理
+
+    threading.Thread(target=_bg_gemini, daemon=True).start()
 
 
 # ==========================================

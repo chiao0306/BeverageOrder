@@ -771,19 +771,22 @@ function updateAiScriptPreview() {
 
     const spokenLines = buildSpokenDrinkLines();
     const bagPart = reqBag ? "我們需要買塑膠袋裝起來，" : "";
-    const notesPart = customNotes ? `另外補充說明：${customNotes}。` : "";
+    const notesPart = customNotes ? `另外補充需求：${customNotes}。` : "";
 
     const scriptText = [
         `【AI 撥通「${shopName}」後的對話目標】（音色：${voiceText}）`,
-        `🗣️ 開場白：「你好，我要電話訂飲料自取，總共 ${aiTotalCups} 杯，我一個品項一個品項慢慢唸給您聽好嗎？第一個是：...」`,
+        `🗣️ 開場白：「你好，我要電話訂飲料自取，總共 ${aiTotalCups} 杯，我一個品項一個品項慢慢唸給您聽好嗎？」`,
+        `   👉 ⚠️【AI 停下來等待】：等店員回答「好，請說」或「可以」後，才開始唸第 1 個品項`,
         ``,
         `📋 依序報單（一次念 1 個品項，等店員出聲才念下一個；同品項多杯時會說「再來是... X杯」，絕不說「下一杯X杯」）：`,
         ...spokenLines.map(line => `   ${line}`),
         ``,
-        `💬 結尾確認與留資料（明確分兩階段，必等店員回答金額）：`,
-        `   階段一【問總金額】：AI 說：「以上總共 ${aiTotalCups} 杯。${notesPart}${bagPart}請問這樣總共多少錢？」（預估約 $${aiEstimatedTotalPrice} 元）`,
-        `   👉 ⚠️【AI 停下來等待】：店員出聲回答具體總金額`,
-        `   階段二【告知時間與留資料】：店員回答金額後，AI 說：「好的，那我們大概預計【${reqTime ? pickupTimeInput : "待會"}】過去拿，取餐人稱呼是 ${callerName}，聯絡電話是 ${callerPhone}，麻煩您了，謝謝拜拜！」`
+        `💬 結尾確認與留資料（從容互動，絕不急躁）：`,
+        `   1. 【問總金額】：AI 說：「以上總共 ${aiTotalCups} 杯。${notesPart}${bagPart}請問這樣總共多少錢？」（預估約 $${aiEstimatedTotalPrice} 元）`,
+        `      👉 ⚠️【AI 停下來等待】：等店員出聲回答具體總金額`,
+        `   2. 【告知時間、留資料並詢問確認】：店員報完金額後，AI 說：「好的，那我們大概預計【${reqTime ? pickupTimeInput : "待會"}】過去拿，取餐人稱呼是 ${callerName}，聯絡電話是 ${callerPhone}。請問內容這樣都清楚、有需要再確認哪一杯嗎？」`,
+        `      👉 ⚠️【AI 停下來等待】：等店員回答「都清楚了」或核對完畢`,
+        `   3. 【禮貌道謝道別】：店員確認無誤後，AI 說：「好的，非常感謝你，那我們待會過去拿，謝謝拜拜！」`
     ].join("\n");
 
     const previewEl = document.getElementById("aiScriptPreview");
