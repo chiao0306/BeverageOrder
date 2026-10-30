@@ -43,6 +43,8 @@ TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
 TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "").strip()
 # 選填：Cloud Run 公開網址（如 https://beverageorder-xxx.asia-east1.run.app），未填則自動由 request.host 推斷
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+# 測試功能通行密碼（由環境變數注入）
+AI_CALL_PASSWORD = os.environ.get("AI_CALL_PASSWORD", "").strip()
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -231,6 +233,12 @@ def do_post():
         action = payload.get("action")
         if action == "addOrder":
             result["data"] = add_order(payload["orderData"])
+        elif action == "verifyAiCallPassword":
+            input_pwd = str(payload.get("password", "")).strip()
+            if AI_CALL_PASSWORD and input_pwd == AI_CALL_PASSWORD:
+                result["data"] = {"success": True, "message": "密碼驗證成功"}
+            else:
+                result["error"] = "密碼錯誤，請重新輸入！"
         elif action == "startAiPhoneCall":
             result["data"] = start_ai_phone_call(payload.get("callData", {}))
         elif action == "getAiCallStatus":

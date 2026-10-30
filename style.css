@@ -331,3 +331,27 @@ textarea {
 .status-pulse-dot {
     animation: pulse-dot 1.5s infinite ease-in-out;
 }
+
+/* 🧪 測試中的功能（平常呈灰色、看起來像無效按鈕） */
+.btn-test-feature {
+    background-color: #94a3b8 !important;
+    color: #f1f5f9 !important;
+    cursor: default !important;
+    opacity: 0.65;
+    box-shadow: none !important;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+.btn-test-feature:hover {
+    background-color: #94a3b8 !important;
+    color: #f1f5f9 !important;
+    transform: none !important;
+    box-shadow: none !important;
+    opacity: 0.65 !important;
+}
+.btn-test-feature:active {
+    background-color: #94a3b8 !important;
+    transform: none !important;
+    box-shadow: none !important;
+}

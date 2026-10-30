@@ -44,6 +44,7 @@ let raffleTimeout = null; let isRaffleActive = false;
 // 3. 網頁載入時啟動
 // ==========================================
 window.onload = async function() {
+    initTestFeatureButton();
     try {
         // 取得店家與扣打資訊
         const shopInfo = await apiGet('getCurrentShop');
@@ -611,13 +612,142 @@ function updateToggleButtonText() { document.getElementById("toggleViewBtn").inn
 
 
 // ==========================================
+// 🧪 測試中的功能長按 2 秒與通行密碼驗證
+// ==========================================
+let testFeatureTimer = null;
+
+function initTestFeatureButton() {
+    const btn = document.getElementById("testFeatureBtn");
+    if (!btn || btn.dataset.longPressBound === "true") return;
+    btn.dataset.longPressBound = "true";
+
+    function startPress(e) {
+        clearTimeout(testFeatureTimer);
+        testFeatureTimer = setTimeout(() => {
+            if (navigator.vibrate) {
+                try { navigator.vibrate(60); } catch (err) {}
+            }
+            openAiCallPage();
+        }, 2000); // 嚴格長按兩秒
+    }
+
+    function cancelPress() {
+        clearTimeout(testFeatureTimer);
+    }
+
+    // 滑鼠事件（僅左鍵）
+    btn.addEventListener("mousedown", (e) => {
+        if (e.button === 0) startPress(e);
+    });
+    btn.addEventListener("mouseup", cancelPress);
+    btn.addEventListener("mouseleave", cancelPress);
+
+    // 觸控事件
+    btn.addEventListener("touchstart", (e) => {
+        startPress(e);
+    }, { passive: true });
+    btn.addEventListener("touchend", cancelPress);
+    btn.addEventListener("touchcancel", cancelPress);
+
+    // 平常直接點擊完全無效
+    btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+}
+
+// 頁面就緒時立即嘗試綁定
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initTestFeatureButton);
+} else {
+    initTestFeatureButton();
+}
+
+// ==========================================
 // 7. 📞 AI 電話訂購頁面邏輯
 // ==========================================
 let aiAggregatedItems = [];
 let aiEstimatedTotalPrice = 0;
 let aiTotalCups = 0;
 
+const AI_CALL_SESSION_KEY = "beverage_ai_call_unlocked";
+
+function isAiCallUnlocked() {
+    return sessionStorage.getItem(AI_CALL_SESSION_KEY) === "true";
+}
+
+function openAiPasswordModal() {
+    const modal = document.getElementById("aiPasswordModal");
+    const input = document.getElementById("aiPasswordInput");
+    const errorEl = document.getElementById("aiPasswordError");
+    if (modal) modal.style.display = "flex";
+    if (errorEl) errorEl.innerText = "";
+    if (input) {
+        input.value = "";
+        input.style.borderColor = "#cbd5e1";
+        setTimeout(() => input.focus(), 100);
+    }
+}
+
+function closeAiPasswordModal() {
+    const modal = document.getElementById("aiPasswordModal");
+    if (modal) modal.style.display = "none";
+}
+
+async function submitAiPassword() {
+    const input = document.getElementById("aiPasswordInput");
+    const errorEl = document.getElementById("aiPasswordError");
+    const submitBtn = document.getElementById("aiPasswordSubmitBtn");
+    const password = (input?.value || "").trim();
+
+    if (!password) {
+        if (errorEl) errorEl.innerText = "請輸入密碼！";
+        if (input) {
+            input.style.borderColor = "#ef4444";
+            input.focus();
+        }
+        return;
+    }
+
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = "驗證中... ⏳";
+    }
+    if (errorEl) errorEl.innerText = "";
+
+    try {
+        const res = await apiPost("verifyAiCallPassword", { password });
+        if (res && res.success) {
+            sessionStorage.setItem(AI_CALL_SESSION_KEY, "true");
+            closeAiPasswordModal();
+            await proceedToAiCallPage();
+        } else {
+            throw new Error("密碼錯誤，請重新輸入！");
+        }
+    } catch (err) {
+        if (errorEl) errorEl.innerText = err.message || "密碼錯誤，請重新輸入！";
+        if (input) {
+            input.style.borderColor = "#ef4444";
+            input.value = "";
+            input.focus();
+        }
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerText = "確認";
+        }
+    }
+}
+
 async function openAiCallPage() {
+    if (!isAiCallUnlocked()) {
+        openAiPasswordModal();
+        return;
+    }
+    await proceedToAiCallPage();
+}
+
+async function proceedToAiCallPage() {
     showPage("page-ai-call");
     updateHeaderForPage("page-ai-call");
 
