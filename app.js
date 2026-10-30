@@ -740,11 +740,9 @@ async function submitAiPassword() {
 }
 
 async function openAiCallPage() {
-    if (!isAiCallUnlocked()) {
-        openAiPasswordModal();
-        return;
-    }
-    await proceedToAiCallPage();
+    // 每次長按進入皆強制要求輸入密碼驗證
+    sessionStorage.removeItem(AI_CALL_SESSION_KEY);
+    openAiPasswordModal();
 }
 
 async function proceedToAiCallPage() {
