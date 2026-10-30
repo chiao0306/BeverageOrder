@@ -1,173 +1,310 @@
-<!DOCTYPE html>
-<html lang="zh-Hant">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>手銲股訂飲料</title>
-    <!-- 載入外部 CSS 樣式表 -->
-    <link rel="stylesheet" href="style.css?v=2026101702">
-</head>
-<body>
-
-<div class="app-container">
-    <div class="header" id="appHeader">🥤 手銲股訂飲料</div>
-    <div class="content">
-        <!-- 首頁目錄 -->
-        <div id="page-directory" class="page active">
-            <div id="directoryLoading" style="text-align: center; padding: 20px; color: #555;">連線中... ⏳</div>
-            
-            <h3 id="directoryTitle" style="text-align: center; color: #555; margin-top: 0; display: none;">今日開放訂購店家</h3>
-            
-            <!-- 開放的店家 (置中顯示) -->
-            <div id="openShopContainer" style="display: none; justify-content: center; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;"></div>
-
-            <!-- 分隔線與未開放提示 -->
-            <div id="closedShopDivider" style="display: none; text-align: center; margin: 20px 0;">
-                <hr style="border: 0; border-top: 1px dashed #ccc; margin-bottom: 10px;">
-                <span style="color: #999; font-size: 14px;">以下為未開放店家</span>
-            </div>
-
-            <!-- 未開放的店家 (可以加個半透明效果做區別) -->
-            <div id="closedShopContainer" style="display: none; justify-content: center; flex-wrap: wrap; gap: 10px; opacity: 0.6;"></div>
-
-            <button class="btn btn-sheet" style="margin-top: 20px;" onclick="loadSummary()">📊 查看目前訂單</button>
-        </div>
-
-        <!-- 菜單頁面 -->
-        <div id="page-menu" class="page">
-            <div style="margin-bottom: 15px;">
-                <button id="raffleBtn" class="btn raffle-btn" style="margin-top: 0;" onclick="startDrinkRaffle()">🎲 幫我抽一杯</button>
-            </div>
-
-            <div id="menuContainer"></div>
-            <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
-            <div id="raffleOverlay" class="raffle-overlay" hidden onclick="stopDrinkRaffle()">
-                <div id="raffleMessage" class="raffle-message">🎲 正在抽籤…</div>
-            </div>
-        </div>
-
-        <!-- 點餐頁面 -->
-        <div id="page-order" class="page">
-            <div class="order-card">
-                <div class="drink-name-display" id="selectedDrinkName">飲品名稱</div>
-                <div class="drink-price-display" id="selectedDrinkPrice">價目表</div>
-                <div class="form-group">
-                    <label>訂購人姓名：</label>
-                    <select id="userName"><option value="" disabled selected>載入中...</option></select>
-                </div>
-                <div class="form-group">
-                    <label>容量與金額：</label>
-                    <select id="userSize" onchange="updateToppingList(); updateQuotaInfo();"></select>
-                </div>
-                <div class="form-group">
-                    <label>甜度：</label>
-                    <select id="userSugar">
-                        <option value="正常糖">正常糖</option>
-                        <option value="八分糖">八分糖</option>
-                        <option value="半糖">半糖</option>
-                        <option value="三分糖" selected>三分糖 (微糖)</option>
-                        <option value="一分糖">一分糖</option>
-                        <option value="無糖">無糖</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>冰塊：</label>
-                    <select id="userIce">
-                        <option value="正常冰">正常冰</option>
-                        <option value="少冰">少冰</option>
-                        <option value="微冰" selected>微冰</option>
-                        <option value="去冰">去冰</option>
-                        <option value="溫">溫</option>
-                        <option value="熱">熱</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>配料：</label>
-                    <select id="userTopping" onchange="updateQuotaInfo()"></select>
-                </div>
-                <div id="quotaDisplayArea"></div>
-                
-                <!-- 這裡呼叫的是修改後的 submitOrder()，負責叫出彈窗 -->
-                <button class="btn btn-submit" id="submitBtn" onclick="submitOrder()">✅ 確認送出訂單</button>
-                <div id="loading" style="display:none; text-align:center;"></div>
-                <button class="btn btn-back" onclick="goToMenu()">🔙 返回菜單</button>
-            </div>
-        </div>
-
-        <!-- 訂購成功頁面 -->
-        <div id="page-success" class="page">
-            <div class="success-card">
-                <div class="success-icon">✅</div>
-                <h2>訂購成功！</h2>
-                <p class="success-message">🎉 訂單已成功送出</p>
-                <div id="successOrderDetails" class="success-order-details"></div>
-                <div id="successDiffNotice" class="success-diff-notice" style="display: none;"></div>
-                <button class="btn btn-submit" onclick="goToDirectory()">🏠 回到首頁</button>
-            </div>
-        </div>
-
-        <!-- 總表頁面 -->
-        <div id="page-summary" class="page">
-            <div id="shopInfoDisplay" class="shop-info-title"></div>
-            <div style="text-align: center;">
-                <button id="toggleViewBtn" class="btn" onclick="toggleTableView()">🔍 切換為「一般檢視」</button>
-                <button id="toggleSortBtn" class="btn" onclick="toggleSortView()">📑 依品項排序</button>
-            </div>
-            <div id="summaryLoading">讀取中... ⏳</div>
-            <div class="summary-table-wrapper" id="summaryTableWrapper" style="display: none;"></div>
-            <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
-        </div>
-        
-    </div> <!-- 🌟 關鍵點：<div class="content"> 的結尾在這裡！ -->
-
-    <!-- 💡 訂單確認彈窗 (獨立於所有頁面之外，放在這裡最完美) -->
-    <div id="confirmModal" class="modal-overlay" style="display: none;">
-        <div class="modal-content">
-            <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px;">📝 請確認您的訂單</h3>
-            <div id="confirmOrderDetails">
-            </div>
-            <div style="display: flex; gap: 10px;">
-                <button class="btn btn-back" style="flex: 1;" onclick="closeConfirmModal()">🔙 重選</button>
-                <button class="btn btn-submit" style="flex: 1; background-color: #27AE60;" id="finalSubmitBtn" onclick="executeSubmitOrder()">✅ 確認訂購</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 已訂購過的重複訂購確認彈窗 -->
-    <div id="reorderModal" class="modal-overlay" style="display: none;">
-        <div class="modal-content">
-            <h3 style="margin-top: 0; color: #E67E22; border-bottom: 2px solid #eee; padding-bottom: 10px;">⚠️ 要重新訂購嗎？</h3>
-            <div id="reorderDetails"></div>
-            <div style="display: flex; gap: 10px; margin-top: 15px;">
-                <button class="btn btn-back" style="flex: 1;" onclick="closeReorderModal()">🔙 取消</button>
-                <button class="btn btn-submit" style="flex: 1; background-color: #E67E22;" onclick="confirmReorder()">🔁 重新訂購</button>
-            </div>
-        </div>
-    </div>
-
-</div> <!-- 最外層 <div class="app-container"> 的結尾 -->
-
-<!-- 依序載入資料庫與邏輯檔案 -->
-<!-- 1. 先宣告一個全域的空資料庫物件 -->
-<script>
-    const allShopsDatabase = {};
-</script>
-
-<!-- 2. 分別載入各家店的獨立檔案 -->
-<script src="menu/shop_50lan.js?v=2026050504"></script>
-<script src="menu/shop_8.js?v=2026050504"></script>
-<script src="menu/shop_macu.js?v=2026050504"></script>
-<script src="menu/shop_milkshop.js?v=2026050504"></script>
-<script src="menu/shop_nine.js?v=2026050504"></script>
-<script src="menu/shop_canornot.js?v=2026050504"></script>
-<script src="menu/shop_onewooday.js?v=2026050504"></script>
-<script src="menu/shop_chanung.js?v=2026050504"></script>
-<script src="menu/shop_dezheng.js?v=2026050504"></script>
-<script src="menu/shop_unocha.js?v=2026050504"></script>
-<script src="menu/shop_nanafru.js?v=2026050504"></script> 
-
-<!-- 3. 最後載入主程式邏輯 -->
-<script src="app.js?v=2026101702"></script>
-
-</body>
-</html>
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手銲股訂飲料</title>
+    <!-- 載入外部 CSS 樣式表 -->
+    <link rel="stylesheet" href="style.css?v=2026101702">
+</head>
+<body>
+
+<div class="app-container">
+    <div class="header" id="appHeader">🥤 手銲股訂飲料</div>
+    <div class="content">
+        <!-- 首頁目錄 -->
+        <div id="page-directory" class="page active">
+            <div id="directoryLoading" style="text-align: center; padding: 20px; color: #555;">連線中... ⏳</div>
+            
+            <h3 id="directoryTitle" style="text-align: center; color: #555; margin-top: 0; display: none;">今日開放訂購店家</h3>
+            
+            <!-- 開放的店家 (置中顯示) -->
+            <div id="openShopContainer" style="display: none; justify-content: center; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;"></div>
+
+            <!-- 分隔線與未開放提示 -->
+            <div id="closedShopDivider" style="display: none; text-align: center; margin: 20px 0;">
+                <hr style="border: 0; border-top: 1px dashed #ccc; margin-bottom: 10px;">
+                <span style="color: #999; font-size: 14px;">以下為未開放店家</span>
+            </div>
+
+            <!-- 未開放的店家 (可以加個半透明效果做區別) -->
+            <div id="closedShopContainer" style="display: none; justify-content: center; flex-wrap: wrap; gap: 10px; opacity: 0.6;"></div>
+
+            <button class="btn btn-sheet" style="margin-top: 20px;" onclick="loadSummary()">📊 查看目前訂單</button>
+            <button id="testFeatureBtn" class="btn btn-test-feature" type="button">🧪 測試中的功能</button>
+        </div>
+
+        <!-- 菜單頁面 -->
+        <div id="page-menu" class="page">
+            <div style="margin-bottom: 15px;">
+                <button id="raffleBtn" class="btn raffle-btn" style="margin-top: 0;" onclick="startDrinkRaffle()">🎲 幫我抽一杯</button>
+            </div>
+
+            <div id="menuContainer"></div>
+            <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
+            <div id="raffleOverlay" class="raffle-overlay" hidden onclick="stopDrinkRaffle()">
+                <div id="raffleMessage" class="raffle-message">🎲 正在抽籤…</div>
+            </div>
+        </div>
+
+        <!-- 點餐頁面 -->
+        <div id="page-order" class="page">
+            <div class="order-card">
+                <div class="drink-name-display" id="selectedDrinkName">飲品名稱</div>
+                <div class="drink-price-display" id="selectedDrinkPrice">價目表</div>
+                <div class="form-group">
+                    <label>訂購人姓名：</label>
+                    <select id="userName"><option value="" disabled selected>載入中...</option></select>
+                </div>
+                <div class="form-group">
+                    <label>容量與金額：</label>
+                    <select id="userSize" onchange="updateToppingList(); updateQuotaInfo();"></select>
+                </div>
+                <div class="form-group">
+                    <label>甜度：</label>
+                    <select id="userSugar">
+                        <option value="正常糖">正常糖</option>
+                        <option value="八分糖">八分糖</option>
+                        <option value="半糖">半糖</option>
+                        <option value="三分糖" selected>三分糖 (微糖)</option>
+                        <option value="一分糖">一分糖</option>
+                        <option value="無糖">無糖</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>冰塊：</label>
+                    <select id="userIce">
+                        <option value="正常冰">正常冰</option>
+                        <option value="少冰">少冰</option>
+                        <option value="微冰" selected>微冰</option>
+                        <option value="去冰">去冰</option>
+                        <option value="溫">溫</option>
+                        <option value="熱">熱</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>配料：</label>
+                    <select id="userTopping" onchange="updateQuotaInfo()"></select>
+                </div>
+                <div id="quotaDisplayArea"></div>
+                
+                <!-- 這裡呼叫的是修改後的 submitOrder()，負責叫出彈窗 -->
+                <button class="btn btn-submit" id="submitBtn" onclick="submitOrder()">✅ 確認送出訂單</button>
+                <div id="loading" style="display:none; text-align:center;"></div>
+                <button class="btn btn-back" onclick="goToMenu()">🔙 返回菜單</button>
+            </div>
+        </div>
+
+        <!-- 訂購成功頁面 -->
+        <div id="page-success" class="page">
+            <div class="success-card">
+                <div class="success-icon">✅</div>
+                <h2>訂購成功！</h2>
+                <p class="success-message">🎉 訂單已成功送出</p>
+                <div id="successOrderDetails" class="success-order-details"></div>
+                <div id="successDiffNotice" class="success-diff-notice" style="display: none;"></div>
+                <button class="btn btn-submit" onclick="goToDirectory()">🏠 回到首頁</button>
+            </div>
+        </div>
+
+        <!-- 總表頁面 -->
+        <div id="page-summary" class="page">
+            <div id="shopInfoDisplay" class="shop-info-title"></div>
+            <div style="text-align: center;">
+                <button id="toggleViewBtn" class="btn" onclick="toggleTableView()">🔍 切換為「一般檢視」</button>
+                <button id="toggleSortBtn" class="btn" onclick="toggleSortView()">📑 依品項排序</button>
+            </div>
+            <div id="summaryLoading">讀取中... ⏳</div>
+            <div class="summary-table-wrapper" id="summaryTableWrapper" style="display: none;"></div>
+            <button class="btn btn-ai-call" style="display: none;" onclick="openAiCallPage()">📞 前往 AI 電話訂購</button>
+            <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
+        </div>
+        
+        <!-- 📞 AI 電話訂購頁面 -->
+        <div id="page-ai-call" class="page">
+            <!-- 1. 已點飲料彙整清單 -->
+            <div class="ai-section-card">
+                <div class="ai-section-header">
+                    <span>🥤 1. 目前已點飲料彙整</span>
+                    <button type="button" class="btn-mini" onclick="refreshAiOrderList()">🔄 重新整理</button>
+                </div>
+                <div id="aiOrderLoading" style="text-align: center; padding: 12px; color: #666;">正在彙整目前訂單... ⏳</div>
+                <div id="aiOrderSummaryStats" class="ai-stats-bar" style="display: none;"></div>
+                <div id="aiAggregatedList" class="ai-drink-list" style="display: none;"></div>
+            </div>
+
+            <!-- 2. 店家與發話電話設定 -->
+            <div class="ai-section-card">
+                <div class="ai-section-header">
+                    <span>☎️ 2. 店家與撥號資訊</span>
+                </div>
+                <div class="form-group">
+                    <label for="aiShopName">店家名稱：</label>
+                    <input type="text" id="aiShopName" placeholder="例如：50嵐（小港店）" oninput="updateAiScriptPreview(); savePickupInfo();">
+                </div>
+                <div class="form-group">
+                    <label for="aiShopPhone">店家電話（受話方）：</label>
+                    <input type="tel" id="aiShopPhone" placeholder="例如：07-8012345 或 0912345678" oninput="updateAiScriptPreview(); savePickupInfo();">
+                </div>
+                <div class="form-group">
+                    <label for="aiCallerPhone">發話 / 取餐聯絡電話（某人的電話）：</label>
+                    <input type="tel" id="aiCallerPhone" placeholder="例如：0912-345-678" oninput="updateAiScriptPreview(); savePickupInfo();">
+                    <div class="field-hint">💡 若此號碼已驗證可作為來電顯示；同時 AI 會在電話中主動報此號碼作為取餐聯絡電話。</div>
+                </div>
+                <div class="form-group">
+                    <label for="aiCallerName">取餐人稱呼（選填）：</label>
+                    <input type="text" id="aiCallerName" placeholder="例如：陳先生 / 手銲股" value="陳先生" oninput="updateAiScriptPreview(); savePickupInfo();">
+                </div>
+                <div class="form-group">
+                    <label for="aiVoiceSelect">🎙️ AI 說話聲音 / 性別：</label>
+                    <select id="aiVoiceSelect" onchange="updateAiScriptPreview(); savePickupInfo();">
+                        <option value="Aoede" selected>👩 Aoede（親切甜美女聲 - 預設）</option>
+                        <option value="Kore">👩 Kore（自信俐落女聲）</option>
+                        <option value="Puck">👨 Puck（陽光自然男聲）</option>
+                        <option value="Charon">👨 Charon（沉穩成熟男聲）</option>
+                        <option value="Fenrir">👨 Fenrir（活力熱情男聲）</option>
+                    </select>
+                    <div class="field-hint">💡 可切換男聲或女聲，AI 會適配人設並在整通電話維持同一位說話者聲音。</div>
+                </div>
+            </div>
+
+            <!-- 3. 訂購需求設定 -->
+            <div class="ai-section-card">
+                <div class="ai-section-header">
+                    <span>💬 3. 請 AI 詢問與轉達的需求</span>
+                </div>
+                <div class="checkbox-group">
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="reqAskPrice" checked onchange="updateAiScriptPreview()">
+                        <span>💰 詢問總金額多少（並核對明細）</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="reqNeedBag" checked onchange="updateAiScriptPreview()">
+                        <span>🛍️ 要買塑膠袋（請店員一起算進總金額）</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="reqAskPickupTime" checked onchange="updateAiScriptPreview()">
+                        <span>🕒 主動告知店家預計自取時間</span>
+                    </label>
+                </div>
+                <div class="form-group" style="margin-top: 10px; margin-bottom: 0;">
+                    <label for="aiPickupTime">🕒 預計自取時間（告知店家）：</label>
+                    <input type="text" id="aiPickupTime" placeholder="例如：20分鐘後 或 14:30" value="20分鐘後" oninput="updateAiScriptPreview(); savePickupInfo();">
+                    <div class="field-hint">💡 自取時間由我方直接告知店家；店員報完總金額後，AI 會告知此時間並留下姓名電話。</div>
+                </div>
+                <div class="form-group" style="margin-top: 12px; margin-bottom: 0;">
+                    <label for="aiCustomNotes">其他補充需求（可自由輸入）：</label>
+                    <textarea id="aiCustomNotes" rows="2" placeholder="例如：自取、不用吸管、需要統編..." oninput="updateAiScriptPreview()"></textarea>
+                </div>
+            </div>
+
+            <!-- 4. AI 講稿預覽與撥打控制 -->
+            <div class="ai-section-card">
+                <div class="ai-section-header">
+                    <span>🤖 4. AI 電話應對腳本預覽</span>
+                </div>
+                <div id="aiScriptPreview" class="ai-script-box"></div>
+                <button type="button" class="btn btn-ai-call" id="startAiCallBtn" onclick="startAiPhoneCall()">📞 請 AI 立即打電話訂飲料</button>
+                <button type="button" class="btn btn-simulate" id="voiceTestBtn" onclick="toggleVoiceTest()">🎙️ 網頁語音實測（我扮演店員，免電話費）</button>
+                <button type="button" class="btn btn-simulate" id="simulateAiCallBtn" onclick="simulateAiPhoneCall()">🧪 模擬通話測試（免接電話 API 預覽流程）</button>
+                <div id="aiCallStatusBox" class="ai-call-status" style="display: none;"></div>
+            </div>
+
+            <!-- 5. 取飲料資訊紀錄卡 -->
+            <div class="ai-section-card pickup-info-card">
+                <div class="ai-section-header">
+                    <span>📝 5. 取飲料資訊紀錄</span>
+                    <span id="pickupSavedBadge" class="saved-badge" style="display: none;">已儲存</span>
+                </div>
+                <div class="field-hint" style="margin-bottom: 12px;">AI 通話結束後會自動填入以下結果，你也可以隨時手動修改並複製到群組：</div>
+                <div class="pickup-grid">
+                    <div class="form-group">
+                        <label for="pickupTotalAmount">💰 店家確認總金額：</label>
+                        <input type="text" id="pickupTotalAmount" placeholder="待確認 (例: $522 含袋)" oninput="savePickupInfo()">
+                    </div>
+                    <div class="form-group">
+                        <label for="pickupTime">🕒 預計幾點去拿：</label>
+                        <input type="text" id="pickupTime" placeholder="待確認 (例: 14:30)" oninput="savePickupInfo()">
+                    </div>
+                    <div class="form-group">
+                        <label for="pickupBagInfo">🛍️ 塑膠袋狀態：</label>
+                        <input type="text" id="pickupBagInfo" placeholder="例：需要塑膠袋 (已加購)" value="需要塑膠袋" oninput="savePickupInfo()">
+                    </div>
+                    <div class="form-group">
+                        <label for="pickupOrderNo">🔢 取餐號碼 / 備註：</label>
+                        <input type="text" id="pickupOrderNo" placeholder="例：留電話末三碼 / 取餐號" oninput="savePickupInfo()">
+                    </div>
+                </div>
+                <button type="button" class="btn btn-copy-pickup" onclick="copyPickupSummary()">📋 一鍵複製取餐資訊（貼到群組）</button>
+            </div>
+
+            <button class="btn btn-back" onclick="goToDirectory()">🏠 回到首頁</button>
+        </div>
+
+    </div> <!-- 🌟 關鍵點：<div class="content"> 的結尾在這裡！ -->
+
+    <!-- 💡 訂單確認彈窗 (獨立於所有頁面之外，放在這裡最完美) -->
+    <div id="confirmModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px;">📝 請確認您的訂單</h3>
+            <div id="confirmOrderDetails">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-back" style="flex: 1;" onclick="closeConfirmModal()">🔙 重選</button>
+                <button class="btn btn-submit" style="flex: 1; background-color: #27AE60;" id="finalSubmitBtn" onclick="executeSubmitOrder()">✅ 確認訂購</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 已訂購過的重複訂購確認彈窗 -->
+    <div id="reorderModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h3 style="margin-top: 0; color: #E67E22; border-bottom: 2px solid #eee; padding-bottom: 10px;">⚠️ 要重新訂購嗎？</h3>
+            <div id="reorderDetails"></div>
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                <button class="btn btn-back" style="flex: 1;" onclick="closeReorderModal()">🔙 取消</button>
+                <button class="btn btn-submit" style="flex: 1; background-color: #E67E22;" onclick="confirmReorder()">🔁 重新訂購</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 🧪 測試功能通行密碼彈窗 -->
+        <div id="aiPasswordModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="max-width: 340px; text-align: center;">
+            <h3 style="margin-top: 0; color: #1e293b; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px;">🔒 請輸入通行密碼</h3>
+            <input type="password" id="aiPasswordInput" placeholder="請輸入密碼" autocomplete="off" style="width: 100%; box-sizing: border-box; padding: 12px; font-size: 20px; text-align: center; letter-spacing: 6px; border: 2px solid #cbd5e1; border-radius: 10px; margin: 15px 0 8px 0; outline: none; transition: border-color 0.2s;" onkeydown="if(event.key==='Enter') submitAiPassword()">
+            <div id="aiPasswordError" style="color: #ef4444; font-size: 13px; min-height: 20px; margin-bottom: 12px; font-weight: 500;"></div>
+            <div style="display: flex; gap: 10px;">
+                <button type="button" class="btn btn-back" style="flex: 1;" onclick="closeAiPasswordModal()">取消</button>
+                <button type="button" class="btn btn-submit" style="flex: 1; background-color: #475569;" id="aiPasswordSubmitBtn" onclick="submitAiPassword()">確認</button>
+            </div>
+        </div>
+    </div>
+
+</div> <!-- 最外層 <div class="app-container"> 的結尾 -->
+
+<!-- 依序載入資料庫與邏輯檔案 -->
+<!-- 1. 先宣告一個全域的空資料庫物件 -->
+<script>
+    const allShopsDatabase = {};
+</script>
+
+<!-- 2. 分別載入各家店的獨立檔案 -->
+<script src="menu/shop_50lan.js?v=2026050504"></script>
+<script src="menu/shop_8.js?v=2026050504"></script>
+<script src="menu/shop_macu.js?v=2026050504"></script>
+<script src="menu/shop_milkshop.js?v=2026050504"></script>
+<script src="menu/shop_nine.js?v=2026050504"></script>
+<script src="menu/shop_canornot.js?v=2026050504"></script>
+<script src="menu/shop_onewooday.js?v=2026050504"></script>
+<script src="menu/shop_chanung.js?v=2026050504"></script>
+<script src="menu/shop_dezheng.js?v=2026050504"></script>
+<script src="menu/shop_unocha.js?v=2026050504"></script>
+<script src="menu/shop_nanafru.js?v=2026050504"></script> 
+
+<!-- 3. 最後載入主程式邏輯 -->
+<script src="app.js?v=2026101702"></script>
+
+</body>
+</html>

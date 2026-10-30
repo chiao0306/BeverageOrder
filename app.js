@@ -44,6 +44,7 @@ let raffleTimeout = null; let isRaffleActive = false;
 // 3. 網頁載入時啟動
 // ==========================================
 window.onload = async function() {
+    initTestFeatureButton();
     try {
         // 取得店家與扣打資訊
         const shopInfo = await apiGet('getCurrentShop');
@@ -565,6 +566,11 @@ function updateHeaderForPage(pageId) {
     } else if (pageId === "page-success") {
         header.innerText = "訂購完成";
         header.style.background = "#27AE60";
+    } else if (pageId === "page-ai-call") {
+        header.innerText = "📞 AI 電話訂飲料";
+        header.style.background = "#2563EB";
+        return;
+        header.style.background = "#27AE60";
     } else if (pageId === "page-menu" || pageId === "page-order") {
         const shopData = allShopsDatabase[currentShopName];
         if (shopData) {
@@ -603,3 +609,1112 @@ function toggleTableView() {
     updateToggleButtonText(); 
 }
 function updateToggleButtonText() { document.getElementById("toggleViewBtn").innerText = isCompactView ? "↔️ 放大檢視" : "🔍 縮小檢視"; }
+
+
+// ==========================================
+// 🧪 測試中的功能長按 2 秒與通行密碼驗證
+// ==========================================
+let testFeatureTimer = null;
+
+function initTestFeatureButton() {
+    const btn = document.getElementById("testFeatureBtn");
+    if (!btn || btn.dataset.longPressBound === "true") return;
+    btn.dataset.longPressBound = "true";
+
+    function startPress(e) {
+        clearTimeout(testFeatureTimer);
+        testFeatureTimer = setTimeout(() => {
+            if (navigator.vibrate) {
+                try { navigator.vibrate(60); } catch (err) {}
+            }
+            openAiCallPage();
+        }, 2000); // 嚴格長按兩秒
+    }
+
+    function cancelPress() {
+        clearTimeout(testFeatureTimer);
+    }
+
+    // 滑鼠事件（僅左鍵）
+    btn.addEventListener("mousedown", (e) => {
+        if (e.button === 0) startPress(e);
+    });
+    btn.addEventListener("mouseup", cancelPress);
+    btn.addEventListener("mouseleave", cancelPress);
+
+    // 觸控事件
+    btn.addEventListener("touchstart", (e) => {
+        startPress(e);
+    }, { passive: true });
+    btn.addEventListener("touchend", cancelPress);
+    btn.addEventListener("touchcancel", cancelPress);
+
+    // 平常直接點擊完全無效
+    btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+}
+
+// 頁面就緒時立即嘗試綁定
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initTestFeatureButton);
+} else {
+    initTestFeatureButton();
+}
+
+// ==========================================
+// 7. 📞 AI 電話訂購頁面邏輯
+// ==========================================
+let aiAggregatedItems = [];
+let aiEstimatedTotalPrice = 0;
+let aiTotalCups = 0;
+
+const AI_CALL_SESSION_KEY = "beverage_ai_call_unlocked";
+
+function isAiCallUnlocked() {
+    return sessionStorage.getItem(AI_CALL_SESSION_KEY) === "true";
+}
+
+function openAiPasswordModal() {
+    const modal = document.getElementById("aiPasswordModal");
+    const input = document.getElementById("aiPasswordInput");
+    const errorEl = document.getElementById("aiPasswordError");
+    if (modal) modal.style.display = "flex";
+    if (errorEl) errorEl.innerText = "";
+    if (input) {
+        input.value = "";
+        input.style.borderColor = "#cbd5e1";
+        setTimeout(() => input.focus(), 100);
+    }
+}
+
+function closeAiPasswordModal() {
+    const modal = document.getElementById("aiPasswordModal");
+    if (modal) modal.style.display = "none";
+}
+
+async function submitAiPassword() {
+    const input = document.getElementById("aiPasswordInput");
+    const errorEl = document.getElementById("aiPasswordError");
+    const submitBtn = document.getElementById("aiPasswordSubmitBtn");
+    const password = (input?.value || "").trim();
+
+    if (!password) {
+        if (errorEl) errorEl.innerText = "請輸入密碼！";
+        if (input) {
+            input.style.borderColor = "#ef4444";
+            input.focus();
+        }
+        return;
+    }
+
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = "驗證中... ⏳";
+    }
+    if (errorEl) errorEl.innerText = "";
+
+    try {
+        const res = await apiPost("verifyAiCallPassword", { password });
+        if (res && res.success) {
+            sessionStorage.setItem(AI_CALL_SESSION_KEY, "true");
+            closeAiPasswordModal();
+            await proceedToAiCallPage();
+        } else {
+            throw new Error("密碼錯誤，請重新輸入！");
+        }
+    } catch (err) {
+        if (errorEl) errorEl.innerText = err.message || "密碼錯誤，請重新輸入！";
+        if (input) {
+            input.style.borderColor = "#ef4444";
+            input.value = "";
+            input.focus();
+        }
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerText = "確認";
+        }
+    }
+}
+
+async function openAiCallPage() {
+    if (!isAiCallUnlocked()) {
+        openAiPasswordModal();
+        return;
+    }
+    await proceedToAiCallPage();
+}
+
+async function proceedToAiCallPage() {
+    showPage("page-ai-call");
+    updateHeaderForPage("page-ai-call");
+
+    loadSavedPickupInfo();
+
+    const shopInput = document.getElementById("aiShopName");
+    if (shopInput && !shopInput.value.trim() && activeShop) {
+        shopInput.value = activeShop;
+    }
+
+    await refreshAiOrderList();
+}
+
+async function refreshAiOrderList() {
+    const loadingEl = document.getElementById("aiOrderLoading");
+    const statsEl = document.getElementById("aiOrderSummaryStats");
+    const listEl = document.getElementById("aiAggregatedList");
+
+    loadingEl.style.display = "block";
+    loadingEl.innerText = "正在彙整目前訂單... ⏳";
+    statsEl.style.display = "none";
+    listEl.style.display = "none";
+
+    try {
+        const data = await apiGet("getOrderData");
+        aggregateOrderItems(data);
+        renderAiOrderList();
+        updateAiScriptPreview();
+    } catch (e) {
+        loadingEl.innerText = "訂單讀取失敗：" + e.message;
+        console.error(e);
+    }
+}
+
+function aggregateOrderItems(rows) {
+    aiAggregatedItems = [];
+    aiEstimatedTotalPrice = 0;
+    aiTotalCups = 0;
+
+    if (!rows || rows.length <= 1) return;
+
+    const map = new Map();
+
+    // 第 0 列為表頭 [姓名, 飲品, 容量, 甜度, 冰塊, 配料, 總金額, 差額]
+    for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const personName = String(row[0] || "").trim();
+        const drink = String(row[1] || "").trim();
+        const size = String(row[2] || "").trim();
+        const sugar = String(row[3] || "").trim();
+        const ice = String(row[4] || "").trim();
+        const topping = String(row[5] || "").trim();
+        const price = parseFloat(row[6]);
+
+        // 過濾空白列或試算表最底部的「總計/合計」列
+        if (!drink) continue;
+        if (personName.includes("總計") || personName.includes("合計") || drink.includes("總計")) continue;
+        if (!size && !sugar && !ice) continue;
+
+        const cleanTopping = (!topping || topping === "無" || topping === "-") ? "無配料" : `加${topping}`;
+        const key = `${drink}|${size}|${sugar}|${ice}|${cleanTopping}`;
+
+        if (!map.has(key)) {
+            map.set(key, {
+                drink,
+                size,
+                sugar,
+                ice,
+                topping: cleanTopping,
+                count: 0,
+                subtotal: 0,
+                orderers: []
+            });
+        }
+
+        const item = map.get(key);
+        item.count += 1;
+        if (!isNaN(price)) {
+            item.subtotal += price;
+            aiEstimatedTotalPrice += price;
+        }
+        if (personName) item.orderers.push(personName);
+        aiTotalCups += 1;
+    }
+
+    aiAggregatedItems = Array.from(map.values()).sort((a, b) => {
+        const cmp = a.drink.localeCompare(b.drink, "zh-Hant");
+        return cmp !== 0 ? cmp : b.count - a.count;
+    });
+}
+
+function renderAiOrderList() {
+    const loadingEl = document.getElementById("aiOrderLoading");
+    const statsEl = document.getElementById("aiOrderSummaryStats");
+    const listEl = document.getElementById("aiAggregatedList");
+
+    loadingEl.style.display = "none";
+    statsEl.style.display = "flex";
+    listEl.style.display = "block";
+
+    statsEl.innerHTML = `
+        <span>🥤 總杯數：${aiTotalCups} 杯</span>
+        <span>💰 試算表預估金額：$${aiEstimatedTotalPrice}</span>
+    `;
+
+    if (aiAggregatedItems.length === 0) {
+        listEl.innerHTML = `<div style="text-align:center; color:#888; padding: 12px;">目前尚無已點飲料資料</div>`;
+        return;
+    }
+
+    listEl.innerHTML = aiAggregatedItems.map(item => {
+        const toppingBadge = item.topping === "無配料" ? "" : ` / ${escapeHtml(item.topping)}`;
+        const specText = `${escapeHtml(item.size)} / ${escapeHtml(item.sugar)} / ${escapeHtml(item.ice)}${toppingBadge}`;
+        return `
+            <div class="ai-drink-item">
+                <div>
+                    <div style="font-weight: bold; color: #111827;">${escapeHtml(item.drink)}</div>
+                    <div style="font-size: 13px; color: #4b5563;">${specText} <span style="color:#9ca3af;">(${escapeHtml(item.orderers.join("、"))})</span></div>
+                </div>
+                <span class="ai-drink-count">x ${item.count} 杯</span>
+            </div>
+        `;
+    }).join("");
+}
+
+function buildSpokenDrinkLines() {
+    if (aiAggregatedItems.length === 0) {
+        return ["（目前尚無飲料明細，請先點餐或重新整理）"];
+    }
+    return aiAggregatedItems.map((item, idx) => {
+        const cleanDrinkName = item.drink.replace(/\s*\(.*?\)/g, "");
+        const cleanSize = item.size.includes("L") || item.size.includes("大") ? "大杯"
+                        : item.size.includes("M") || item.size.includes("中") ? "中杯"
+                        : item.size;
+        const toppingPart = item.topping === "無配料" ? "" : `、${item.topping}`;
+        return `${idx + 1}. ${cleanDrinkName}，${cleanSize}，${item.sugar}${item.ice}${toppingPart}，${item.count} 杯`;
+    });
+}
+
+function updateAiScriptPreview() {
+    const shopName = document.getElementById("aiShopName")?.value.trim() || activeShop || "店家";
+    const callerPhone = document.getElementById("aiCallerPhone")?.value.trim() || "（未填電話）";
+    const callerName = document.getElementById("aiCallerName")?.value.trim() || "我們";
+    const voiceSelect = document.getElementById("aiVoiceSelect");
+    const voiceText = voiceSelect ? voiceSelect.options[voiceSelect.selectedIndex]?.text : "Aoede（女聲）";
+    const reqPrice = document.getElementById("reqAskPrice")?.checked;
+    const reqBag = document.getElementById("reqNeedBag")?.checked;
+    const reqTime = document.getElementById("reqAskPickupTime")?.checked;
+    const pickupTimeInput = document.getElementById("aiPickupTime")?.value.trim() || "20分鐘後";
+    const customNotes = document.getElementById("aiCustomNotes")?.value.trim() || "";
+
+    const spokenLines = buildSpokenDrinkLines();
+    const bagPart = reqBag ? "我們需要買塑膠袋裝起來，" : "";
+    const notesPart = customNotes ? `另外補充需求：${customNotes}。` : "";
+
+    const scriptText = [
+        `【AI 撥通「${shopName}」後的對話目標】（音色：${voiceText}）`,
+        `🗣️ 開場白：「你好，我要電話訂飲料自取，總共 ${aiTotalCups} 杯，我一個品項一個品項慢慢唸給您聽好嗎？」`,
+        `   👉 ⚠️【AI 停下來等待】：等店員回答「好，請說」或「可以」後，才開始唸第 1 個品項`,
+        ``,
+        `📋 依序報單（一次念 1 個品項，等店員出聲才念下一個；同品項多杯時會說「再來是... X杯」，絕不說「下一杯X杯」）：`,
+        ...spokenLines.map(line => `   ${line}`),
+        ``,
+        `💬 結尾確認與留資料（從容互動，絕不急躁）：`,
+        `   1. 【問總金額】：AI 說：「以上總共 ${aiTotalCups} 杯。${notesPart}${bagPart}請問這樣總共多少錢？」（預估約 $${aiEstimatedTotalPrice} 元）`,
+        `      👉 ⚠️【AI 停下來等待】：等店員出聲回答具體總金額`,
+        `   2. 【告知時間、留資料並詢問確認】：店員報完金額後，AI 說：「好的，那我們大概預計【${reqTime ? pickupTimeInput : "待會"}】過去拿，取餐人稱呼是 ${callerName}，聯絡電話是 ${callerPhone}。請問內容這樣都清楚、有需要再確認哪一杯嗎？」`,
+        `      👉 ⚠️【AI 停下來等待】：等店員回答「都清楚了」或核對完畢`,
+        `   3. 【禮貌道謝道別】：店員確認無誤後，AI 說：「好的，非常感謝你，那我們待會過去拿，謝謝拜拜！」`
+    ].join("\n");
+
+    const previewEl = document.getElementById("aiScriptPreview");
+    if (previewEl) previewEl.innerText = scriptText;
+}
+
+function savePickupInfo() {
+    const data = {
+        shopName: document.getElementById("aiShopName")?.value || "",
+        shopPhone: document.getElementById("aiShopPhone")?.value || "",
+        callerPhone: document.getElementById("aiCallerPhone")?.value || "",
+        callerName: document.getElementById("aiCallerName")?.value || "",
+        voiceName: document.getElementById("aiVoiceSelect")?.value || "Aoede",
+        pickupExpectTime: document.getElementById("aiPickupTime")?.value || "20分鐘後",
+        totalAmount: document.getElementById("pickupTotalAmount")?.value || "",
+        pickupTime: document.getElementById("pickupTime")?.value || "",
+        bagInfo: document.getElementById("pickupBagInfo")?.value || "",
+        orderNo: document.getElementById("pickupOrderNo")?.value || ""
+    };
+    try {
+        localStorage.setItem("beverage_ai_pickup_info", JSON.stringify(data));
+        const badge = document.getElementById("pickupSavedBadge");
+        if (badge) {
+            badge.style.display = "inline-block";
+            setTimeout(() => { badge.style.display = "none"; }, 1500);
+        }
+    } catch (e) {
+        console.warn("無法儲存至 localStorage:", e);
+    }
+}
+
+function loadSavedPickupInfo() {
+    try {
+        const raw = localStorage.getItem("beverage_ai_pickup_info");
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (data.shopName && !document.getElementById("aiShopName").value) {
+            document.getElementById("aiShopName").value = data.shopName;
+        }
+        if (data.shopPhone) document.getElementById("aiShopPhone").value = data.shopPhone;
+        if (data.callerPhone) document.getElementById("aiCallerPhone").value = data.callerPhone;
+        if (data.callerName) document.getElementById("aiCallerName").value = data.callerName;
+        if (data.totalAmount) document.getElementById("pickupTotalAmount").value = data.totalAmount;
+        if (data.pickupTime) document.getElementById("pickupTime").value = data.pickupTime;
+        if (data.bagInfo) document.getElementById("pickupBagInfo").value = data.bagInfo;
+        if (data.orderNo) document.getElementById("pickupOrderNo").value = data.orderNo;
+        if (data.voiceName && document.getElementById("aiVoiceSelect")) {
+            document.getElementById("aiVoiceSelect").value = data.voiceName;
+        }
+        if (data.pickupExpectTime && document.getElementById("aiPickupTime")) {
+            document.getElementById("aiPickupTime").value = data.pickupExpectTime;
+        }
+    } catch (e) {
+        console.warn("讀取儲存的取餐資訊失敗:", e);
+    }
+}
+
+function copyPickupSummary() {
+    const shopName = document.getElementById("aiShopName")?.value.trim() || activeShop || "飲料店";
+    const shopPhone = document.getElementById("aiShopPhone")?.value.trim() || "-";
+    const callerName = document.getElementById("aiCallerName")?.value.trim() || "-";
+    const callerPhone = document.getElementById("aiCallerPhone")?.value.trim() || "-";
+    const totalAmount = document.getElementById("pickupTotalAmount")?.value.trim() || `預估 $${aiEstimatedTotalPrice}`;
+    const pickupTime = document.getElementById("pickupTime")?.value.trim() || "待確認";
+    const bagInfo = document.getElementById("pickupBagInfo")?.value.trim() || "無";
+    const orderNo = document.getElementById("pickupOrderNo")?.value.trim() || "-";
+
+    const text = [
+        `🥤 【手銲股取飲料通知】`,
+        `🏪 店家：${shopName} (${shopPhone})`,
+        `📦 總杯數：共 ${aiTotalCups} 杯`,
+        `💰 總金額：${totalAmount}`,
+        `🛍️ 塑膠袋：${bagInfo}`,
+        `🕒 取餐時間：${pickupTime}`,
+        `👤 訂購聯絡人：${callerName} (${callerPhone})`,
+        `🔢 備註/取餐號：${orderNo}`
+    ].join("\n");
+
+    navigator.clipboard.writeText(text).then(() => {
+        alert("✅ 已複製取餐資訊！可以直接貼到 LINE 群組囉：\n\n" + text);
+    }).catch(() => {
+        prompt("請手動複製以下取餐資訊：", text);
+    });
+}
+
+async function simulateAiPhoneCall() {
+    const statusBox = document.getElementById("aiCallStatusBox");
+    const simBtn = document.getElementById("simulateAiCallBtn");
+    const shopName = document.getElementById("aiShopName")?.value.trim() || activeShop || "50嵐";
+    const shopPhone = document.getElementById("aiShopPhone")?.value.trim() || "07-801xxxx";
+    const callerPhone = document.getElementById("aiCallerPhone")?.value.trim() || "0912-345-678";
+    const callerName = document.getElementById("aiCallerName")?.value.trim() || "陳先生";
+    const needBag = document.getElementById("reqNeedBag")?.checked;
+
+    simBtn.disabled = true;
+    statusBox.style.display = "block";
+    statusBox.innerHTML = `📡 <b>[模擬模式]</b> 正在撥號至 <b>${escapeHtml(shopName)} (${escapeHtml(shopPhone)})</b>...`;
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    await sleep(1200);
+    statusBox.innerHTML += `<br>🔔 店員接聽：「喂你好，${escapeHtml(shopName)}請問要點什麼？」`;
+    await sleep(1300);
+    statusBox.innerHTML += `<br>🤖 AI 助理：「你好，我要訂飲料自取，總共 ${aiTotalCups} 杯。${escapeHtml(buildSpokenDrinkLines().join("；"))}。」`;
+    await sleep(1500);
+    const bagFee = needBag ? (aiTotalCups > 6 ? 4 : 2) : 0;
+    const finalSimulatedPrice = aiEstimatedTotalPrice + bagFee;
+    statusBox.innerHTML += `<br>🤖 AI 助理：「${needBag ? "我們要買塑膠袋，" : ""}請問這樣總共多少錢？幾點可以過去拿？」`;
+    await sleep(1500);
+
+    const pickupDate = new Date(Date.now() + 20 * 60000);
+    const pickupTimeStr = `${String(pickupDate.getHours()).padStart(2, "0")}:${String(pickupDate.getMinutes()).padStart(2, "0")}`;
+
+    statusBox.innerHTML += `<br>👩‍🍳 店員：「袋子幫你算 ${bagFee} 元喔，這樣總共 ${finalSimulatedPrice} 元，大概 20 分鐘後、${pickupTimeStr} 可以來拿，請問貴姓電話？」`;
+    await sleep(1300);
+    statusBox.innerHTML += `<br>🤖 AI 助理：「好，我姓${escapeHtml(callerName.charAt(0))}，電話是 ${escapeHtml(callerPhone)}，待會過去拿，謝謝！」`;
+    await sleep(800);
+    statusBox.innerHTML += `<br><span style="color:#16a34a; font-weight:bold;">✅ 通話結束！AI 已自動將取飲料資訊填入下方紀錄卡。</span>`;
+
+    document.getElementById("pickupTotalAmount").value = `$${finalSimulatedPrice}${needBag ? ` (含塑膠袋 $${bagFee})` : ""}`;
+    document.getElementById("pickupTime").value = `${pickupTimeStr} (約 20 分鐘後)`;
+    document.getElementById("pickupBagInfo").value = needBag ? `已加購塑膠袋 (+$${bagFee})` : "不需塑膠袋";
+    document.getElementById("pickupOrderNo").value = `留電 ${callerPhone} (${callerName})`;
+    savePickupInfo();
+    simBtn.disabled = false;
+}
+
+async function startAiPhoneCall() {
+    const shopName = document.getElementById("aiShopName")?.value.trim();
+    const shopPhone = document.getElementById("aiShopPhone")?.value.trim();
+    const callerPhone = document.getElementById("aiCallerPhone")?.value.trim();
+    const callerName = document.getElementById("aiCallerName")?.value.trim() || "先生/小姐";
+
+    if (!shopName) { alert("請輸入店家名稱！"); return; }
+    if (!shopPhone) { alert("請輸入店家電話！"); return; }
+    if (!callerPhone) { alert("請輸入發話 / 取餐聯絡電話！"); return; }
+    if (aiAggregatedItems.length === 0) {
+        if (!confirm("目前尚未偵測到已點飲料明細，確定仍要撥出嗎？")) return;
+    }
+
+    const startBtn = document.getElementById("startAiCallBtn");
+    const statusBox = document.getElementById("aiCallStatusBox");
+    startBtn.disabled = true;
+    startBtn.innerText = "⏳ 正在請求後端發起 AI 通話...";
+    statusBox.style.display = "block";
+    statusBox.innerHTML = "📡 正在傳送訂單與撥號指令至 Cloud Run 後端...";
+
+    const payload = {
+        shopName,
+        shopPhone,
+        callerPhone,
+        callerName,
+        voiceName: document.getElementById("aiVoiceSelect")?.value || "Aoede",
+        pickupTime: document.getElementById("aiPickupTime")?.value.trim() || "20分鐘後",
+        totalCups: aiTotalCups,
+        estimatedPrice: aiEstimatedTotalPrice,
+        items: aiAggregatedItems,
+        spokenLines: buildSpokenDrinkLines(),
+        requirements: {
+            askPrice: document.getElementById("reqAskPrice")?.checked,
+            needBag: document.getElementById("reqNeedBag")?.checked,
+            askPickupTime: document.getElementById("reqAskPickupTime")?.checked,
+            customNotes: document.getElementById("aiCustomNotes")?.value.trim() || ""
+        }
+    };
+
+    try {
+        const res = await apiPost("startAiPhoneCall", { callData: payload });
+        if (res.callId) {
+            startCallMonitor(res.callId, res.e164ShopPhone || shopPhone);
+        } else {
+            statusBox.innerHTML = `⚠️ 撥號未傳回 callId：${escapeHtml(JSON.stringify(res))}`;
+            startBtn.disabled = false;
+            startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
+        }
+    } catch (e) {
+        statusBox.innerHTML = `⚠️ <b>無法發起真實撥號</b>：${escapeHtml(e.message)}<br>👉 請確認 Cloud Run 環境變數已設定 <code>GEMINI_API_KEY</code>、<code>TWILIO_ACCOUNT_SID</code>、<code>TWILIO_AUTH_TOKEN</code> 與 <code>TWILIO_FROM_NUMBER</code>，或先點擊上方的「🎙️ 網頁語音實測」免電話費測試流程！`;
+        startBtn.disabled = false;
+        startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
+    }
+}
+
+let monitorState = null;
+let aiCallPollTimer = null;
+
+function startCallMonitor(callId, shopPhone) {
+    if (aiCallPollTimer) clearTimeout(aiCallPollTimer);
+    cleanupCallMonitor();
+
+    const statusBox = document.getElementById("aiCallStatusBox");
+    const startBtn = document.getElementById("startAiCallBtn");
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.innerText = "📞 AI 正在通話中...";
+    }
+
+    statusBox.style.display = "block";
+    statusBox.innerHTML = `
+        <div class="monitor-container" style="background:#f8fafc; border:2px solid #3b82f6; border-radius:12px; padding:16px; margin-top:8px;">
+            <!-- 頂部列：狀態與控制按鈕 -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="status-pulse-dot" style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#22c55e;"></span>
+                    <b id="monitorTitle" style="font-size:16px; color:#1e293b;">📞 正在撥打門市（${escapeHtml(shopPhone)}）...</b>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" id="monitorAudioBtn" class="btn" style="padding:6px 12px; font-size:13px; background:#0284c7; color:#fff;" onclick="toggleMonitorMute()">
+                        🎧 監聽中（點擊靜音）
+                    </button>
+                    <button type="button" class="btn" style="padding:6px 12px; font-size:13px; background:#ef4444; color:#fff; font-weight:bold;" onclick="triggerEmergencyHangup('${callId}')">
+                        🛑 緊急掛斷
+                    </button>
+                </div>
+            </div>
+
+            <!-- 音量動態與說話者標籤 -->
+            <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+                <span style="font-size:12px; color:#64748b; font-weight:bold;">通話音訊：</span>
+                <div style="flex:1; height:8px; background:#e2e8f0; border-radius:4px; overflow:hidden;">
+                    <div id="monitorMeter" style="height:100%; width:0%; background:#3b82f6; transition:width 0.08s linear;"></div>
+                </div>
+                <span id="monitorSpeakerTag" style="font-size:12px; color:#2563eb; font-weight:bold;">連線中...</span>
+            </div>
+
+            <!-- 即時逐字稿 -->
+            <div id="monitorTranscript" style="margin-top:10px; height:180px; overflow-y:auto; background:#ffffff; border:1px solid #cbd5e1; border-radius:8px; padding:10px; font-size:13px; line-height:1.6; white-space:pre-wrap;">
+                <span style="color:#94a3b8;">⏳ 等待電話接通並載入對話...</span>
+            </div>
+
+            <!-- 介入控制 1：耳語提示 AI（Whisper Prompt） -->
+            <div style="margin-top:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px;">
+                <div style="font-size:13px; font-weight:bold; color:#1e40af; margin-bottom:8px;">
+                    💬 即時耳語提示 AI（AI 會用完全相同的聲音口氣跟店員改單/補充，不穿幫）：
+                </div>
+                <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '改點波霸')">🏷️ 改點波霸</button>
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '改點椰果')">🏷️ 改點椰果</button>
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '載具不用，直接印發票')">🏷️ 載具不用，印發票</button>
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '改成半糖微冰')">🏷️ 改成半糖微冰</button>
+                    <button type="button" class="whisper-chip" onclick="sendWhisperPrompt('${callId}', '請店員稍等一下')">🏷️ 請店員稍等一下</button>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="customWhisperInput" placeholder="輸入自訂指令提示 AI（例：店員說珍珠賣完，改茶凍）" style="flex:1; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;" onkeydown="if(event.key==='Enter') sendCustomWhisperPrompt('${callId}')">
+                    <button type="button" class="btn" style="padding:6px 14px; background:#2563eb; color:#fff; font-size:13px;" onclick="sendCustomWhisperPrompt('${callId}')">傳送提示</button>
+                </div>
+            </div>
+
+            <!-- 介入控制 2：真人插話接管 (Voice Takeover) -->
+            <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; padding:10px 14px;">
+                <div>
+                    <b style="font-size:13px; color:#c2410c;">🎙️ 人工插話接管（直接對電話講話）：</b>
+                    <div style="font-size:12px; color:#7c2d12; margin-top:2px;">點擊後 AI 立即靜音，由您對電腦麥克風說話，店員會直接聽見您的真人聲音。</div>
+                </div>
+                <button type="button" id="takeoverBtn" class="btn" style="padding:8px 16px; background:#ea580c; color:#fff; font-weight:bold; font-size:13px; white-space:nowrap;" onclick="toggleVoiceTakeover('${callId}')">
+                    🎙️ 開始人工接管
+                </button>
+            </div>
+        </div>
+    `;
+
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const outCtx = new AC({ sampleRate: 24000 });
+    const wsUrl = GAS_API_URL.replace(/^http/, "ws").replace(/\/$/, "") + "/call-monitor-stream/" + callId;
+    let ws;
+    try {
+        ws = new WebSocket(wsUrl);
+    } catch (e) {
+        console.warn("Monitor WebSocket error, fallback to polling:", e);
+        pollAiCallStatus(callId);
+        return;
+    }
+
+    const state = {
+        callId,
+        ws,
+        outCtx,
+        muted: false,
+        nextTime: 0,
+        sources: new Set(),
+        takingOver: false,
+        takeoverStream: null,
+        takeoverProc: null,
+        takeoverCtx: null
+    };
+    monitorState = state;
+
+    ws.onmessage = (ev) => {
+        try {
+            const m = JSON.parse(ev.data);
+            handleMonitorMessage(state, m);
+        } catch (e) {
+            console.error("Monitor msg parse error:", e);
+        }
+    };
+
+    ws.onerror = (e) => {
+        console.warn("Monitor WS error, starting fallback poll:", e);
+        pollAiCallStatus(callId);
+    };
+
+    ws.onclose = () => {
+        console.log("Monitor WS closed.");
+    };
+}
+
+function handleMonitorMessage(state, m) {
+    const titleEl = document.getElementById("monitorTitle");
+    const tagEl = document.getElementById("monitorSpeakerTag");
+    const meterEl = document.getElementById("monitorMeter");
+
+    if (m.type === "init" || m.type === "status") {
+        if (m.status === "in-progress") {
+            if (titleEl) titleEl.innerText = `🗣️ AI 正在通話點餐中（${escapeHtml(m.shopName || "")}）`;
+        } else if (m.status === "ringing") {
+            if (titleEl) titleEl.innerText = `🔔 店家電話響鈴中...`;
+        }
+        if (m.transcript && Array.isArray(m.transcript)) {
+            renderMonitorTranscript(m.transcript);
+        }
+    } else if (m.type === "audio") {
+        if (!state.muted && m.data) {
+            playMonitorAudio(state, m.data, m.sampleRate || 24000);
+        }
+        if (tagEl) {
+            tagEl.innerText = m.who === "clerk" ? "👩‍🍳 店員講話中..." : "🤖 AI 應答中...";
+            tagEl.style.color = m.who === "clerk" ? "#d97706" : "#2563eb";
+        }
+        if (meterEl) {
+            meterEl.style.width = "75%";
+            setTimeout(() => { if (meterEl) meterEl.style.width = "5%"; }, 120);
+        }
+    } else if (m.type === "transcript") {
+        renderMonitorTranscript(m.lines);
+    } else if (m.type === "notice") {
+        const transcriptEl = document.getElementById("monitorTranscript");
+        if (transcriptEl) {
+            transcriptEl.innerHTML += `<div style="color:#059669; font-weight:bold; margin-top:6px;">${escapeHtml(m.text)}</div>`;
+            transcriptEl.scrollTop = transcriptEl.scrollHeight;
+        }
+    } else if (m.type === "ended") {
+        finishCallMonitor(m);
+    }
+}
+
+function renderMonitorTranscript(lines) {
+    const transcriptEl = document.getElementById("monitorTranscript");
+    if (!transcriptEl) return;
+    const text = (lines || []).join("\n");
+    transcriptEl.innerHTML = text ? escapeHtml(text) : '<span style="color:#94a3b8;">⏳ 等待對話語音串流...</span>';
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+function playMonitorAudio(state, b64, sampleRate) {
+    try {
+        state.outCtx.resume();
+        const raw = atob(b64);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        const pcm = new Int16Array(bytes.buffer);
+        const buf = state.outCtx.createBuffer(1, pcm.length, sampleRate);
+        const ch = buf.getChannelData(0);
+        for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768.0;
+        const node = state.outCtx.createBufferSource();
+        node.buffer = buf;
+        node.connect(state.outCtx.destination);
+        const now = state.outCtx.currentTime;
+        const start = Math.max(now, state.nextTime);
+        node.start(start);
+        state.nextTime = start + buf.duration;
+        state.sources.add(node);
+        node.onended = () => state.sources.delete(node);
+    } catch (e) {
+        console.warn("playMonitorAudio error:", e);
+    }
+}
+
+function toggleMonitorMute() {
+    if (!monitorState) return;
+    monitorState.muted = !monitorState.muted;
+    const btn = document.getElementById("monitorAudioBtn");
+    if (btn) {
+        if (monitorState.muted) {
+            btn.innerText = "🔇 靜音中（點擊開啟監聽）";
+            btn.style.background = "#64748b";
+        } else {
+            btn.innerText = "🎧 監聽中（點擊靜音）";
+            btn.style.background = "#0284c7";
+            monitorState.outCtx.resume();
+        }
+    }
+}
+
+function sendWhisperPrompt(callId, text) {
+    if (!text || !text.trim()) return;
+    const cleanText = text.trim();
+    if (monitorState && monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+        monitorState.ws.send(JSON.stringify({ type: "whisper", text: cleanText }));
+    } else {
+        apiPost("whisperAiCall", { callId, text: cleanText });
+    }
+    const transcriptEl = document.getElementById("monitorTranscript");
+    if (transcriptEl) {
+        transcriptEl.innerHTML += `<div style="color:#2563eb; font-weight:bold; margin-top:4px;">💬 [你已送出耳語提示]：${escapeHtml(cleanText)}</div>`;
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    }
+}
+
+function sendCustomWhisperPrompt(callId) {
+    const input = document.getElementById("customWhisperInput");
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) return;
+    sendWhisperPrompt(callId, text);
+    input.value = "";
+}
+
+async function toggleVoiceTakeover(callId) {
+    if (!monitorState) return;
+    const btn = document.getElementById("takeoverBtn");
+    if (!monitorState.takingOver) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+            });
+            const AC = window.AudioContext || window.webkitAudioContext;
+            const inCtx = new AC();
+            await inCtx.resume();
+            const src = inCtx.createMediaStreamSource(stream);
+            const proc = inCtx.createScriptProcessor(4096, 1, 1);
+            const ratio = inCtx.sampleRate / 16000;
+
+            proc.onaudioprocess = (e) => {
+                if (!monitorState || !monitorState.takingOver) return;
+                const input = e.inputBuffer.getChannelData(0);
+                const outLen = Math.floor(input.length / ratio);
+                const pcm = new Int16Array(outLen);
+                for (let i = 0; i < outLen; i++) {
+                    const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
+                    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                const b64 = btoa(String.fromCharCode(...new Uint8Array(pcm.buffer)));
+                if (monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+                    monitorState.ws.send(JSON.stringify({ type: "takeover_audio", data: b64 }));
+                }
+            };
+            src.connect(proc);
+            proc.connect(inCtx.destination);
+
+            monitorState.takingOver = true;
+            monitorState.takeoverStream = stream;
+            monitorState.takeoverProc = proc;
+            monitorState.takeoverCtx = inCtx;
+
+            if (monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+                monitorState.ws.send(JSON.stringify({ type: "takeover_start" }));
+            }
+            if (btn) {
+                btn.innerText = "🛑 停止接管（交還 AI 繼續）";
+                btn.style.background = "#dc2626";
+            }
+        } catch (e) {
+            alert("無法開啟麥克風接管通話: " + e.message);
+        }
+    } else {
+        stopVoiceTakeover();
+    }
+}
+
+function stopVoiceTakeover() {
+    if (!monitorState) return;
+    monitorState.takingOver = false;
+    try { monitorState.takeoverProc && monitorState.takeoverProc.disconnect(); } catch (e) {}
+    try { monitorState.takeoverStream && monitorState.takeoverStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    try { monitorState.takeoverCtx && monitorState.takeoverCtx.close(); } catch (e) {}
+    monitorState.takeoverProc = null;
+    monitorState.takeoverStream = null;
+    monitorState.takeoverCtx = null;
+
+    if (monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+        monitorState.ws.send(JSON.stringify({ type: "takeover_stop" }));
+    }
+    const btn = document.getElementById("takeoverBtn");
+    if (btn) {
+        btn.innerText = "🎙️ 開始人工接管";
+        btn.style.background = "#ea580c";
+    }
+}
+
+function triggerEmergencyHangup(callId) {
+    if (!confirm("確定要緊急強制掛斷通話嗎？")) return;
+    if (monitorState && monitorState.ws && monitorState.ws.readyState === WebSocket.OPEN) {
+        monitorState.ws.send(JSON.stringify({ type: "hangup" }));
+    } else {
+        apiPost("hangupAiCall", { callId });
+    }
+}
+
+function finishCallMonitor(m) {
+    cleanupCallMonitor();
+    const statusBox = document.getElementById("aiCallStatusBox");
+    const startBtn = document.getElementById("startAiCallBtn");
+    if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
+    }
+
+    let html = `<div><b>✅ 通話已結束</b></div>`;
+    if (m.transcript) {
+        html += `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:200px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 完整逐字稿：</b>\n${escapeHtml(m.transcript)}</div>`;
+    }
+    if (m.summary) {
+        html += `<div style="margin-top:8px; color:#1e40af;"><b>💡 AI 通話摘要：</b>${escapeHtml(m.summary)}</div>`;
+    }
+    const p = m.pickupInfo || {};
+    if (p.totalAmount) document.getElementById("pickupTotalAmount").value = p.totalAmount;
+    if (p.pickupTime) document.getElementById("pickupTime").value = p.pickupTime;
+    if (p.bagInfo) document.getElementById("pickupBagInfo").value = p.bagInfo;
+    if (p.orderNotes) document.getElementById("pickupOrderNo").value = p.orderNotes;
+    savePickupInfo();
+
+    html += `<div style="margin-top:8px; color:#16a34a; font-weight:bold;">🎉 已自動從通話結果擷取取餐資訊並填入下方紀錄卡！</div>`;
+    if (statusBox) statusBox.innerHTML = html;
+}
+
+function cleanupCallMonitor() {
+    stopVoiceTakeover();
+    const state = monitorState;
+    monitorState = null;
+    if (state) {
+        try { state.sources.forEach(s => s.stop()); } catch (e) {}
+        try { state.outCtx && state.outCtx.close(); } catch (e) {}
+        try { state.ws && state.ws.close(); } catch (e) {}
+    }
+}
+
+async function pollAiCallStatus(callId) {
+    if (aiCallPollTimer) clearTimeout(aiCallPollTimer);
+    const statusBox = document.getElementById("aiCallStatusBox");
+    const startBtn = document.getElementById("startAiCallBtn");
+
+    const statusMap = {
+        "queued": "⏳ 排隊撥號中 (queued)",
+        "ringing": "🔔 店家電話響鈴中 (ringing)...",
+        "in-progress": "🗣️ AI 正在與店員通話點餐中 (in-progress)...",
+        "forwarding": "🔀 轉接中 (forwarding)...",
+        "ended": "✅ 通話已結束 (ended)"
+    };
+
+    try {
+        const info = await apiPost("getAiCallStatus", { callId });
+        const statusText = statusMap[info.status] || info.status;
+
+        let html = `<div><b>📡 通話狀態：</b>${escapeHtml(statusText)}</div>`;
+        if (info.transcript) {
+            html += `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:180px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 即時逐字稿：</b>\n${escapeHtml(info.transcript)}</div>`;
+        }
+        if (info.summary) {
+            html += `<div style="margin-top:8px; color:#1e40af;"><b>💡 AI 通話摘要：</b>${escapeHtml(info.summary)}</div>`;
+        }
+        if (info.recordingUrl) {
+            html += `<div style="margin-top:8px;"><audio controls src="${escapeHtml(info.recordingUrl)}" style="width:100%; height:36px;"></audio></div>`;
+        }
+
+        statusBox.innerHTML = html;
+
+        if (info.status === "ended") {
+            startBtn.disabled = false;
+            startBtn.innerText = "📞 請 AI 立即打電話訂飲料";
+
+            const p = info.pickupInfo || {};
+            if (p.totalAmount) document.getElementById("pickupTotalAmount").value = p.totalAmount;
+            if (p.pickupTime) document.getElementById("pickupTime").value = p.pickupTime;
+            if (p.bagInfo) document.getElementById("pickupBagInfo").value = p.bagInfo;
+            if (p.orderNotes) document.getElementById("pickupOrderNo").value = p.orderNotes;
+            savePickupInfo();
+
+            statusBox.innerHTML += `<div style="margin-top:8px; color:#16a34a; font-weight:bold;">🎉 已自動從通話結果擷取取餐資訊並填入下方紀錄卡！</div>`;
+            return;
+        }
+    } catch (err) {
+        console.warn("輪詢通話狀態失敗:", err);
+    }
+
+    aiCallPollTimer = setTimeout(() => pollAiCallStatus(callId), 3000);
+}
+
+
+// ==========================================
+// 🎙️ 網頁語音實測：用電腦麥克風直接跟 Gemini Live AI 對話（你扮演店員，免 Twilio 電話費）
+// ==========================================
+let vtState = null;
+const VT_METER_HTML = `<div style="margin-top:6px; font-size:12px;">🎤 麥克風音量（講話時應會跳動）：<div style="height:8px; background:#e2e8f0; border-radius:4px;"><div id="vtMeter" style="height:8px; width:0; background:#16a34a; border-radius:4px;"></div></div></div>`;
+
+function vtBuildPayload() {
+    return {
+        shopName: document.getElementById("aiShopName")?.value.trim() || activeShop || "飲料店",
+        shopPhone: document.getElementById("aiShopPhone")?.value.trim() || "",
+        callerPhone: document.getElementById("aiCallerPhone")?.value.trim() || "0912-345-678",
+        callerName: document.getElementById("aiCallerName")?.value.trim() || "陳先生",
+        voiceName: document.getElementById("aiVoiceSelect")?.value || "Aoede",
+        pickupTime: document.getElementById("aiPickupTime")?.value.trim() || "20分鐘後",
+        totalCups: aiTotalCups,
+        estimatedPrice: aiEstimatedTotalPrice,
+        items: aiAggregatedItems,
+        spokenLines: buildSpokenDrinkLines(),
+        requirements: {
+            askPrice: document.getElementById("reqAskPrice")?.checked,
+            needBag: document.getElementById("reqNeedBag")?.checked,
+            askPickupTime: document.getElementById("reqAskPickupTime")?.checked,
+            customNotes: document.getElementById("aiCustomNotes")?.value.trim() || ""
+        }
+    };
+}
+
+async function toggleVoiceTest() {
+    if (vtState) { stopVoiceTest(); return; }
+
+    const btn = document.getElementById("voiceTestBtn");
+    const statusBox = document.getElementById("aiCallStatusBox");
+    statusBox.style.display = "block";
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+        statusBox.innerHTML = "⚠️ 此瀏覽器不支援麥克風（需 https 或 localhost）。";
+        return;
+    }
+
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+        });
+    } catch (e) {
+        statusBox.innerHTML = `⚠️ 無法使用麥克風：${escapeHtml(e.message)}（請允許瀏覽器麥克風權限）`;
+        return;
+    }
+
+    btn.innerText = "⏳ 連線 AI 中...";
+    statusBox.innerHTML = "🔌 正在連線 Cloud Run + Gemini Live...";
+
+    const wsUrl = GAS_API_URL.replace(/^http/, "ws").replace(/\/$/, "") + "/voice-test-stream";
+    const ws = new WebSocket(wsUrl);
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const inCtx = new AC();
+    const outCtx = new AC({ sampleRate: 24000 });
+    const state = { ws, stream, inCtx, outCtx, sources: new Set(), nextTime: 0, ready: false, ended: false, proc: null, src: null };
+    vtState = state;
+
+    ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "setup", callData: vtBuildPayload() }));
+    };
+
+    ws.onmessage = (ev) => {
+        const m = JSON.parse(ev.data);
+        if (m.type === "ready") {
+            state.ready = true;
+            btn.innerText = "⏹️ 結束通話（點擊掛斷）";
+            statusBox.innerHTML = "🟢 <b>已連線</b>！你現在是店員，請先說：「喂你好，" + escapeHtml(vtBuildPayload().shopName) + "」，AI 就會開始點餐。<br>💡 建議戴耳機避免回音。" + VT_METER_HTML;
+            vtStartMic(state);
+        } else if (m.type === "audio") {
+            vtPlay(state, m.data);
+        } else if (m.type === "interrupted") {
+            vtClearPlayback(state);
+        } else if (m.type === "transcript") {
+            state.lastLines = m.lines;
+            vtRenderTranscript(m.lines, state.lastNotice);
+        } else if (m.type === "notice") {
+            state.lastNotice = m.text;
+            vtRenderTranscript(state.lastLines || [], m.text);
+        } else if (m.type === "analyzing") {
+            btn.innerText = "⏳ 正在整理取餐明細...";
+            statusBox.innerHTML = `<div><b>⏳ 通話已結束</b></div><div style="margin-top:8px; color:#1e40af;">🤖 AI 正在整理通話逐字稿並自動帶入總金額與取餐卡...</div>` +
+                (m.transcript ? `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:180px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 通話逐字稿：</b>\n${escapeHtml(m.transcript)}</div>` : "");
+        } else if (m.type === "error") {
+            statusBox.innerHTML = `⚠️ <b>語音實測錯誤</b>：${escapeHtml(m.message)}`;
+        } else if (m.type === "ended") {
+            state.ended = true;
+            vtFinish(m);
+        }
+    };
+
+    ws.onerror = () => {
+        statusBox.innerHTML = "⚠️ 無法連線至後端 WebSocket，請確認 Cloud Run 已部署最新版本。";
+    };
+    ws.onclose = () => {
+        if (vtState === state) vtCleanup();
+    };
+}
+
+function vtStartMic(state) {
+    // Chrome 可能因非同步建立而讓 AudioContext 處於 suspended，必須 resume 才會有麥克風資料
+    state.inCtx.resume();
+    state.outCtx.resume();
+    state.src = state.inCtx.createMediaStreamSource(state.stream);
+    state.proc = state.inCtx.createScriptProcessor(4096, 1, 1);
+    const ratio = state.inCtx.sampleRate / 16000;
+    state.proc.onaudioprocess = (e) => {
+        if (state.ws.readyState !== WebSocket.OPEN || state.ended) return;
+        const input = e.inputBuffer.getChannelData(0);
+        const outLen = Math.floor(input.length / ratio);
+        const pcm = new Int16Array(outLen);
+        for (let i = 0; i < outLen; i++) {
+            const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
+            pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        let peak = 0;
+        for (let i = 0; i < input.length; i += 16) peak = Math.max(peak, Math.abs(input[i]));
+        const meter = document.getElementById("vtMeter");
+        if (meter) meter.style.width = Math.min(100, Math.round(peak * 300)) + "%";
+        const bytes = new Uint8Array(pcm.buffer);
+        let bin = "";
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        state.ws.send(JSON.stringify({ type: "audio", data: btoa(bin) }));
+    };
+    state.src.connect(state.proc);
+    state.proc.connect(state.inCtx.destination);
+}
+
+function vtPlay(state, b64) {
+    const bin = atob(b64);
+    const len = bin.length >> 1;
+    const f32 = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+        let v = bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8);
+        if (v >= 0x8000) v -= 0x10000;
+        f32[i] = v / 0x8000;
+    }
+    const buf = state.outCtx.createBuffer(1, len, 24000);
+    buf.copyToChannel(f32, 0);
+    const node = state.outCtx.createBufferSource();
+    node.buffer = buf;
+    node.connect(state.outCtx.destination);
+    const startAt = Math.max(state.outCtx.currentTime + 0.02, state.nextTime);
+    node.start(startAt);
+    state.nextTime = startAt + buf.duration;
+    state.sources.add(node);
+    node.onended = () => state.sources.delete(node);
+}
+
+function vtClearPlayback(state) {
+    state.sources.forEach(n => { try { n.stop(); } catch (e) { /* ignore */ } });
+    state.sources.clear();
+    state.nextTime = 0;
+}
+
+function vtRenderTranscript(lines, noticeText) {
+    const statusBox = document.getElementById("aiCallStatusBox");
+    const noticeHtml = noticeText ? `<div style="margin-top:6px; color:#059669; font-weight:bold;">${escapeHtml(noticeText)}</div>` : "";
+    statusBox.innerHTML = `<div><b>🟢 通話中（你是店員，對著麥克風說話）</b></div>` + VT_METER_HTML +
+        noticeHtml +
+        `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:220px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 即時逐字稿：</b>\n${escapeHtml((lines || []).join("\n"))}</div>`;
+}
+
+function stopVoiceTest() {
+    const state = vtState;
+    if (!state) return;
+    const btn = document.getElementById("voiceTestBtn");
+    btn.innerText = "⏳ 整理通話結果中...";
+    btn.disabled = true;
+    if (state.proc) { try { state.proc.disconnect(); } catch (e) { /* ignore */ } }
+    state.stream.getTracks().forEach(t => t.stop());
+    vtClearPlayback(state);
+    if (state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: "end" }));
+    } else {
+        vtCleanup();
+    }
+}
+
+function vtFinish(m) {
+    const statusBox = document.getElementById("aiCallStatusBox");
+    let html = `<div><b>✅ 語音實測結束</b></div>`;
+    if (m.transcript) {
+        html += `<div style="margin-top:8px; padding:8px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; max-height:220px; overflow-y:auto; white-space:pre-wrap; font-size:13px;"><b>📝 完整逐字稿：</b>\n${escapeHtml(m.transcript)}</div>`;
+    }
+    if (m.summary) html += `<div style="margin-top:8px; color:#1e40af;"><b>💡 AI 通話摘要：</b>${escapeHtml(m.summary)}</div>`;
+    const p = m.pickupInfo || {};
+    if (p.totalAmount) document.getElementById("pickupTotalAmount").value = p.totalAmount;
+    if (p.pickupTime) document.getElementById("pickupTime").value = p.pickupTime;
+    if (p.bagInfo) document.getElementById("pickupBagInfo").value = p.bagInfo;
+    if (p.orderNotes) document.getElementById("pickupOrderNo").value = p.orderNotes;
+    savePickupInfo();
+    if (p.totalAmount || p.pickupTime) html += `<div style="margin-top:8px; color:#16a34a; font-weight:bold;">🎉 已自動擷取取餐資訊並填入下方紀錄卡！</div>`;
+    statusBox.innerHTML = html;
+    vtCleanup();
+}
+
+function vtCleanup() {
+    const state = vtState;
+    vtState = null;
+    if (state) {
+        try { state.proc && state.proc.disconnect(); } catch (e) { /* ignore */ }
+        try { state.stream.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ }
+        try { state.inCtx.close(); } catch (e) { /* ignore */ }
+        try { state.outCtx.close(); } catch (e) { /* ignore */ }
+        try { state.ws.close(); } catch (e) { /* ignore */ }
+    }
+    const btn = document.getElementById("voiceTestBtn");
+    if (btn) {
+        btn.disabled = false;
+        btn.innerText = "🎙️ 網頁語音實測（我扮演店員，免電話費）";
+    }
+}
