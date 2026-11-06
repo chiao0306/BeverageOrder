@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>管理後台登入</title>
+    <link rel="stylesheet" href="style.css?v=2026110701">
+    <link rel="stylesheet" href="management.css?v=2026110701">
+</head>
+<body>
+<main class="manage-container">
+    <h1>🔐 管理後台登入</h1>
+    <p>一般同事訂飲料不需要登入。</p>
+    <form id="loginForm" class="manage-card">
+        <label for="username">工號</label>
+        <input id="username" autocomplete="username" required maxlength="64">
+        <label for="password">密碼</label>
+        <input id="password" type="password" autocomplete="current-password" required maxlength="256">
+        <button class="btn btn-submit" type="submit">登入</button>
+    </form>
+    <p id="message" role="alert"></p>
+    <a href="index.html">回到訂購首頁</a>
+</main>
+<script src="api-config.js?v=2026110701"></script>
+<script src="management.js?v=2026110701"></script>
+</body>
+</html>

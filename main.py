@@ -1,4 +1,4 @@
-"""飲料訂購後端：Cloud Run (Flask + WebSocket) 串接 Google Sheets、Twilio Voice 與 Gemini Live API。"""
+"""飲料訂購後端：Cloud Run 串接 Firestore、Twilio Voice 與 Gemini Live API。"""
 import asyncio
 import array
 import base64
@@ -11,21 +11,18 @@ import time
 import uuid
 from typing import Optional
 
-import gspread
 import requests
+import firestore_backend as store
 from dotenv import load_dotenv
 from flask import Flask, Response, request
 from flask_sock import Sock
 from google import genai
 from google.genai import types
-from gspread.utils import ValueRenderOption
 from pydantic import BaseModel, Field
 
 # 本機開發時讀取 .env；Cloud Run 上則直接使用環境變數
 load_dotenv()
 
-SHEET_URL = os.environ.get("SHEET_URL", "")
-GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 
 # ==========================================
@@ -46,15 +43,8 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 # 測試功能通行密碼（由環境變數注入）
 AI_CALL_PASSWORD = os.environ.get("AI_CALL_PASSWORD", "").strip()
 
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.readonly",
-]
-
 app = Flask(__name__)
 sock = Sock(app)
-
-_gc = None
 
 # 儲存進行中與已完成的 AI 通話狀態（Cloud Run 單一容器多執行緒共用）
 ACTIVE_CALLS: dict[str, dict] = {}
@@ -159,24 +149,8 @@ def pcm16_16k_to_ulaw_8k(pcm16k_bytes: bytes) -> bytes:
 
 
 # ==========================================
-# Google Sheets 工具函數
+# API 回應工具函數
 # ==========================================
-def get_sheet():
-    """取得試算表第一個工作表；用戶端重複使用以避免每次重新授權。"""
-    global _gc
-    if _gc is None:
-        if GOOGLE_APPLICATION_CREDENTIALS:
-            _gc = gspread.service_account(
-                filename=GOOGLE_APPLICATION_CREDENTIALS, scopes=SCOPES
-            )
-        else:
-            import google.auth
-
-            creds, _ = google.auth.default(scopes=SCOPES)
-            _gc = gspread.authorize(creds)
-    return _gc.open_by_url(SHEET_URL).get_worksheet(0)
-
-
 def json_response(result):
     return Response(
         json.dumps(result, ensure_ascii=False), mimetype="application/json"
@@ -187,7 +161,8 @@ def json_response(result):
 def add_cors_headers(resp):
     resp.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
@@ -210,19 +185,40 @@ def do_get():
     result = {}
     try:
         if action == "getStaffNames":
-            result["data"] = get_staff_names()
+            result["data"] = store.list_staff()
         elif action == "getCurrentShop":
-            result["data"] = get_current_shop()
+            result["data"] = store.get_current_shop()
         elif action == "getOrderData":
-            result["data"] = get_order_data()
+            result["data"] = store.get_order_data()
+        elif action == "managementState":
+            result["data"] = store.management_state(bearer_token())
+        elif action == "listAccounts":
+            result["data"] = store.list_accounts(bearer_token())
+        elif action == "listStaff":
+            store.list_accounts(bearer_token())
+            result["data"] = store.list_staff(include_disabled=True)
         elif action == "getAiCallStatus":
             call_id = request.args.get("callId", "").strip()
             result["data"] = get_ai_call_status(call_id)
         else:
             result["error"] = f"未知的 GET 請求: {action}"
-    except Exception as e:
-        result["error"] = f"{type(e).__name__}: {e}"
+    except store.ApiError as e:
+        return api_error(e)
+    except Exception:
+        app.logger.exception("讀取資料失敗")
+        return api_error(store.ApiError("讀取資料失敗，請稍後再試", 500))
     return json_response(result)
+
+
+def bearer_token():
+    auth = request.headers.get("Authorization", "")
+    return auth[7:] if auth.startswith("Bearer ") else ""
+
+
+def api_error(error):
+    response = json_response({"error": str(error)})
+    response.status_code = error.status
+    return response
 
 
 @app.route("/", methods=["POST"])
@@ -232,7 +228,25 @@ def do_post():
         payload = json.loads(request.get_data(as_text=True))
         action = payload.get("action")
         if action == "addOrder":
-            result["data"] = add_order(payload["orderData"])
+            result["data"] = store.add_order(payload["orderData"])
+        elif action == "login":
+            result["data"] = store.login(payload.get("username"), payload.get("password"))
+        elif action == "logout":
+            result["data"] = store.logout(bearer_token())
+        elif action == "changePassword":
+            result["data"] = store.change_password(bearer_token(), payload.get("oldPassword"), payload.get("newPassword"))
+        elif action == "createAccount":
+            result["data"] = store.create_account(bearer_token(), payload.get("username"))
+        elif action == "updateAccount":
+            result["data"] = store.update_account(bearer_token(), payload.get("username"), payload.get("operation"))
+        elif action == "setAssignee":
+            result["data"] = store.set_assignee(bearer_token(), payload.get("username", ""))
+        elif action == "setShop":
+            result["data"] = store.set_shop(bearer_token(), payload.get("shop"))
+        elif action == "setQuota":
+            result["data"] = store.set_quota(bearer_token(), payload.get("label"), payload.get("value"))
+        elif action == "manageStaff":
+            result["data"] = store.manage_staff(bearer_token(), payload.get("id"), payload.get("name"), payload.get("enabled"))
         elif action == "verifyAiCallPassword":
             input_pwd = str(payload.get("password", "")).strip()
             if AI_CALL_PASSWORD and input_pwd == AI_CALL_PASSWORD:
@@ -249,76 +263,14 @@ def do_post():
             result["data"] = hangup_ai_call(payload.get("callId", ""))
         else:
             result["error"] = f"未知的 POST 請求: {action}"
-    except Exception as e:
-        result["error"] = f"{type(e).__name__}: {e}"
+    except store.ApiError as e:
+        return api_error(e)
+    except (ValueError, KeyError, TypeError):
+        return api_error(store.ApiError("請求格式錯誤"))
+    except Exception:
+        app.logger.exception("處理請求失敗")
+        return api_error(store.ApiError("處理請求失敗，請稍後再試", 500))
     return json_response(result)
-
-
-# ==========================================
-# 核心邏輯：試算表讀寫
-# ==========================================
-def get_staff_names():
-    """讀取 A 欄第 3 列起的人員名單，略過空白。"""
-    names = get_sheet().col_values(1)[2:]
-    return [n.strip() for n in names if n.strip()]
-
-
-def get_current_shop():
-    """讀取 A1~D1：標題、店家、扣打標籤、扣打數值。"""
-    try:
-        row = get_sheet().get(
-            "A1:D1", value_render_option=ValueRenderOption.unformatted
-        )
-        cells = (row[0] if row else []) + [""] * 4
-        return {
-            "title": str(cells[0]).strip(),
-            "shop": str(cells[1]).strip(),
-            "quotaLabel": str(cells[2]).strip(),
-            "quotaValue": cells[3],
-        }
-    except Exception as e:
-        raise RuntimeError(f"試算表讀取失敗: {e}")
-
-
-def get_order_data():
-    """回傳第 2 列起的所有資料，並補齊各列長度以對齊 getValues 的行為。"""
-    rows = get_sheet().get_all_values(
-        value_render_option=ValueRenderOption.unformatted
-    )[1:]
-    width = max((len(r) for r in rows), default=0)
-    return [r + [""] * (width - len(r)) for r in rows]
-
-
-def add_order(data):
-    """依姓名更新既有訂單列；找不到則新增一列。"""
-    sheet = get_sheet()
-    names = sheet.col_values(1)
-    row_index = -1
-    for i in range(2, len(names)):
-        if names[i].strip() == data["name"].strip():
-            row_index = i + 1
-            break
-
-    order_row = [
-        data.get("drink"),
-        data.get("size"),
-        data.get("sugar"),
-        data.get("ice"),
-        data.get("topping"),
-        data.get("totalPrice"),
-        data.get("diff"),
-    ]
-    order_row = ["" if v is None else v for v in order_row]
-
-    if row_index != -1:
-        sheet.update(
-            range_name=f"B{row_index}:H{row_index}",
-            values=[order_row],
-            value_input_option="USER_ENTERED",
-        )
-    else:
-        sheet.append_row([data["name"]] + order_row, value_input_option="USER_ENTERED")
-    return "成功"
 
 
 # ==========================================
@@ -398,7 +350,7 @@ def build_beverage_system_prompt(call_data: dict) -> str:
 - 店員確認後，再依序報下一個品項，一次一項，直到全部共 {total_cups} 杯飲料唸完。
 
 第 3 階段【詢問總金額（這是一個疑問句，⚠️ 說完必須立刻停下來等店員報價！）】：
-- 所有飲料報完後，請說：「以上總共 {total_cups} 杯。{notes_str}{bag_str}請問這樣總共多少錢？」（試算表預估約 {estimated_price} 元）。
+- 所有飲料報完後，請說：「以上總共 {total_cups} 杯。{notes_str}{bag_str}請問這樣總共多少錢？」（訂單預估約 {estimated_price} 元）。
 - ⚠️【極重要停頓規範】：
   說完「請問這樣總共多少錢？」之後，**必須立刻停下來閉嘴！耐心等待店員回答具體總金額**！
   絕對不要在此時把後面的取餐時間與聯絡電話一股腦全部唸完！店員還沒回答金額前，請務必耐心等待店員回答！
@@ -1053,7 +1005,7 @@ def _fallback_extract(transcript_lines: list[str], call_data: dict) -> tuple[dic
                 found_amount = f"${zh_val} 元"
                 break
 
-    # 保底：若逐字稿未提及金額，依訂單試算表預估金額
+    # 逐字稿沒有金額時，以訂單預估金額作為參考。
     if not found_amount:
         est = call_data.get("estimatedPrice", 0)
         found_amount = f"${est} 元 (依訂單預估)" if est else "待確認"

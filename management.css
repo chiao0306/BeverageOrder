@@ -1,0 +1,28 @@
+.manage-container {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 20px;
+}
+.manage-card {
+    background: white;
+    border-radius: 12px;
+    padding: 18px;
+    margin: 16px 0;
+    box-shadow: 0 2px 8px #0002;
+}
+.manage-card h2 { margin-top: 0; font-size: 1.2rem; }
+.manage-card label { display: block; margin-top: 12px; font-weight: bold; }
+.manage-card input, .manage-card select {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 10px;
+    margin-top: 5px;
+    border: 1px solid #aaa;
+    border-radius: 6px;
+    font-size: 1rem;
+}
+.manage-card button { margin-top: 12px; }
+.manage-row { border-top: 1px solid #ddd; padding: 10px 0; }
+.manage-row button { margin-right: 8px; padding: 8px; }
+#message { color: #a71919; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }

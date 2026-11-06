@@ -1,5 +1,3 @@
-// 後端已改為 Cloud Run，部署後請將此處換成實際服務網址（結尾不要加斜線）
-const GAS_API_URL = "https://beverageorder-1075878684960.asia-east1.run.app";
 // 用於將特殊字元轉換為安全格式（防止 XSS 攻擊）
 
 function escapeHtml(unsafe) {
@@ -36,6 +34,7 @@ async function apiPost(action, payload) {
 // 2. 全域變數
 // ==========================================
 let activeShop = ""; let shopTitle = ""; let quotaLabel = ""; let quotaValue = 0;
+let shopDate = ""; let shopRevision = ""; let quotaRevision = "";
 let currentShopName = ""; let currentDrinkObj = null; let isCompactView = true;
 let originalSummaryData = []; let isSortedByItem = false;
 let raffleTimeout = null; let isRaffleActive = false;
@@ -49,6 +48,7 @@ window.onload = async function() {
         // 取得店家與扣打資訊
         const shopInfo = await apiGet('getCurrentShop');
         shopTitle = shopInfo.title; activeShop = shopInfo.shop;
+        shopDate = shopInfo.date; shopRevision = shopInfo.shopRevision; quotaRevision = shopInfo.quotaRevision;
         quotaLabel = shopInfo.quotaLabel || "扣打"; quotaValue = parseFloat(shopInfo.quotaValue) || 0;
         document.getElementById("shopInfoDisplay").innerText = `店家: ${activeShop}`;
         updateToggleButtonText(); 
@@ -58,7 +58,12 @@ window.onload = async function() {
         const names = await apiGet('getStaffNames');
         const nameSelect = document.getElementById("userName");
         nameSelect.innerHTML = '<option value="" disabled selected>請選擇你的名字</option>';
-        names.forEach(name => nameSelect.innerHTML += `<option value="${name}">${name}</option>`);
+        names.forEach(person => {
+            const option = document.createElement("option");
+            option.value = person.id;
+            option.textContent = person.name;
+            nameSelect.appendChild(option);
+        });
     } catch (e) {
         document.getElementById("directoryLoading").innerText = "連線失敗，請重新整理頁面。";
         console.error(e);
@@ -128,6 +133,9 @@ function renderDirectory() {
     // 清空舊內容
     openContainer.innerHTML = "";
     closedContainer.innerHTML = "";
+    if (!activeShop) {
+        openContainer.textContent = "今日尚未開放訂購。";
+    }
     
     let hasClosedShops = false;
     
@@ -302,8 +310,10 @@ let pendingOrderData = null;
 
 // 1. 攔截訂單，顯示確認小視窗
 function submitOrder() {
-    const name = document.getElementById("userName").value;
-    if (!name) { alert("請選擇名字！"); return; }
+    const nameSelect = document.getElementById("userName");
+    const staffId = nameSelect.value;
+    if (!staffId) { alert("請選擇名字！"); return; }
+    const name = nameSelect.selectedOptions[0].textContent;
     
     const sizeSelect = document.getElementById("userSize");
     const toppingSelect = document.getElementById("userTopping");
@@ -313,21 +323,22 @@ function submitOrder() {
     
     let diff = quotaValue > 0 ? Math.max(0, totalPrice - quotaValue) : 0;
     
-    // 暫存要送給 GAS 的訂單資料
+    // 保留送出前確認的店家與扣打版本，避免使用過期資料。
     pendingOrderData = { 
-        name: name, drink: currentDrinkObj.name, size: sizeSelect.value, 
+        name: name, staffId, shop: currentShopName, date: shopDate, shopRevision, quotaRevision,
+        drink: currentDrinkObj.name, size: sizeSelect.value,
         sugar: document.getElementById("userSugar").value, ice: document.getElementById("userIce").value, 
         topping: toppingSelect.value, totalPrice: totalPrice, diff: diff > 0 ? diff : "" 
     };
 
     // 漂亮地排版確認畫面的內容
     const detailsHtml = `
-        👤 <b>訂購人：</b> ${pendingOrderData.name}<br>
-        🥤 <b>飲品：</b> ${pendingOrderData.drink}<br>
-        📏 <b>容量：</b> ${pendingOrderData.size}<br>
-        🍬 <b>甜度：</b> ${pendingOrderData.sugar}<br>
-        🧊 <b>冰塊：</b> ${pendingOrderData.ice}<br>
-        🍯 <b>配料：</b> ${pendingOrderData.topping}<br>
+        👤 <b>訂購人：</b> ${escapeHtml(pendingOrderData.name)}<br>
+        🥤 <b>飲品：</b> ${escapeHtml(pendingOrderData.drink)}<br>
+        📏 <b>容量：</b> ${escapeHtml(pendingOrderData.size)}<br>
+        🍬 <b>甜度：</b> ${escapeHtml(pendingOrderData.sugar)}<br>
+        🧊 <b>冰塊：</b> ${escapeHtml(pendingOrderData.ice)}<br>
+        🍯 <b>配料：</b> ${escapeHtml(pendingOrderData.topping)}<br>
         <hr style="border: 0; border-top: 1px dashed #ccc; margin: 15px 0;">
         <div class="modal-total-price">💰 <b>總金額：</b> $${pendingOrderData.totalPrice}</div>
         ${diff > 0 
@@ -354,7 +365,7 @@ async function executeSubmitOrder() {
     finalSubmitBtn.innerText = "⏳ 傳送中...";
     
     try {
-        // 送出前先查詢試算表，若此人已有訂購飲料，需再次確認是否重新訂購
+        // 覆寫既有訂單前須先讓訂購人確認。
         const existing = await findExistingOrder(pendingOrderData.name);
         if (existing) {
             showReorderModal(existing);
@@ -370,7 +381,7 @@ async function executeSubmitOrder() {
     }
 }
 
-// 在試算表資料中尋找該姓名已訂購的飲料（飲料欄位非空才算已訂購）
+// 飲料欄位非空才視為已有訂單。
 async function findExistingOrder(name) {
     const data = await apiGet('getOrderData');
     for (let i = 1; i < data.length; i++) {
@@ -383,6 +394,9 @@ async function findExistingOrder(name) {
 }
 
 function showReorderModal(row) {
+    pendingOrderData.expectedOrder = {
+        drink: row[1], size: row[2], sugar: row[3], ice: row[4], topping: row[5], totalPrice: row[6]
+    };
     const cell = v => escapeHtml((v === undefined || v === null || v === "") ? "-" : v);
     document.getElementById("reorderDetails").innerHTML = `
         <div style="margin-bottom:10px;">你已經訂購過飲料了：</div>
@@ -401,6 +415,7 @@ function closeReorderModal() {
 
 async function confirmReorder() {
     closeReorderModal();
+    pendingOrderData.overwrite = true;
     const finalSubmitBtn = document.getElementById("finalSubmitBtn");
     finalSubmitBtn.disabled = true;
     finalSubmitBtn.innerText = "⏳ 傳送中...";
@@ -483,7 +498,7 @@ function drawTable(data) {
     
     let html = "<table><thead><tr>";
     
-    // 🛡️ 防護 1：連表頭（通常是試算表第一列）也送進 escapeHtml 進行消毒
+    // 表頭與訂單內容都必須轉義，避免插入不安全的 HTML。
     data[0].forEach(h => html += `<th>${escapeHtml(h)}</th>`);
     html += "</tr></thead><tbody>";
     
@@ -800,7 +815,7 @@ function aggregateOrderItems(rows) {
         const topping = String(row[5] || "").trim();
         const price = parseFloat(row[6]);
 
-        // 過濾空白列或試算表最底部的「總計/合計」列
+        // 總計列不屬於可訂購的飲料。
         if (!drink) continue;
         if (personName.includes("總計") || personName.includes("合計") || drink.includes("總計")) continue;
         if (!size && !sugar && !ice) continue;
@@ -848,7 +863,7 @@ function renderAiOrderList() {
 
     statsEl.innerHTML = `
         <span>🥤 總杯數：${aiTotalCups} 杯</span>
-        <span>💰 試算表預估金額：$${aiEstimatedTotalPrice}</span>
+        <span>💰 預估金額：$${aiEstimatedTotalPrice}</span>
     `;
 
     if (aiAggregatedItems.length === 0) {

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>飲料訂購管理後台</title>
+    <link rel="stylesheet" href="style.css?v=2026110701">
+    <link rel="stylesheet" href="management.css?v=2026110701">
+</head>
+<body>
+<main class="manage-container">
+    <h1>🥤 飲料訂購管理</h1>
+    <p id="identity">正在確認登入狀態…</p>
+    <p id="message" role="alert" aria-live="polite"></p>
+    <div id="management" hidden>
+        <section class="manage-card">
+            <h2>今日店家</h2>
+            <p id="dailyStatus"></p>
+            <form id="shopForm">
+                <label for="shop">選擇店家</label>
+                <select id="shop"></select>
+                <button class="btn btn-submit" type="submit">儲存店家</button>
+            </form>
+            <p>今日已有訂單時，無法切換或關閉店家。</p>
+        </section>
+        <div id="adminSections" hidden>
+            <section class="manage-card">
+                <h2>今日指派</h2>
+                <form id="assigneeForm">
+                    <label for="assignee">指定今日負責人</label>
+                    <select id="assignee"></select>
+                    <button class="btn btn-submit" type="submit">儲存指派</button>
+                </form>
+            </section>
+            <section class="manage-card">
+                <h2>扣打設定</h2>
+                <form id="quotaForm">
+                    <label for="quotaLabel">扣打名稱</label>
+                    <input id="quotaLabel" required maxlength="30">
+                    <label for="quotaValue">扣打金額</label>
+                    <input id="quotaValue" type="number" min="0" max="100000" step="0.01" required>
+                    <button class="btn btn-submit" type="submit">儲存扣打</button>
+                </form>
+                <p>修改後將重新計算當日訂單差額；新的一天沿用此設定。</p>
+            </section>
+            <section class="manage-card">
+                <h2>後台帳號</h2>
+                <p>新增與重設的初始密碼均為工號，容易被猜到，請提醒使用者修改。</p>
+                <form id="accountForm">
+                    <label for="newAccount">新增次級帳號工號</label>
+                    <input id="newAccount" maxlength="64" required>
+                    <button class="btn btn-submit" type="submit">新增帳號</button>
+                </form>
+                <div id="accountList"></div>
+            </section>
+            <section class="manage-card">
+                <h2>訂購人員</h2>
+                <form id="staffForm">
+                    <label for="staffName">新增姓名</label>
+                    <input id="staffName" maxlength="50" required>
+                    <button class="btn btn-submit" type="submit">新增人員</button>
+                </form>
+                <div id="staffList"></div>
+            </section>
+        </div>
+        <section class="manage-card">
+            <h2>修改自己的密碼</h2>
+            <form id="passwordForm">
+                <label for="oldPassword">原密碼</label>
+                <input id="oldPassword" type="password" autocomplete="current-password" required>
+                <label for="newPassword">新密碼（至少 8 個字元）</label>
+                <input id="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="256" required>
+                <button class="btn btn-submit" type="submit">修改密碼</button>
+            </form>
+        </section>
+        <button id="logout" class="btn btn-back" type="button">登出</button>
+    </div>
+    <p><a href="index.html">回到訂購首頁</a></p>
+</main>
+<script src="api-config.js?v=2026110701"></script>
+<script src="management.js?v=2026110701"></script>
+</body>
+</html>
