@@ -14,7 +14,7 @@ from typing import Optional
 import requests
 import firestore_backend as store
 from dotenv import load_dotenv
-from flask import Flask, Response, request, send_from_directory
+from flask import Flask, Response, request
 from flask_sock import Sock
 from google import genai
 from google.genai import types
@@ -171,20 +171,6 @@ def preflight():
     return Response(status=204)
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# 僅開放前端檔案，避免後端原始碼被當成靜態檔下載
-STATIC_FILE_PATTERN = re.compile(
-    r"^(?:(?:admin|login)\.html|(?:style|management)\.css|(?:app|management|api-config)\.js|menu/shop_[a-z0-9_]+\.js)$"
-)
-
-
-@app.route("/<path:filename>", methods=["GET"])
-def frontend_file(filename):
-    if not STATIC_FILE_PATTERN.match(filename):
-        return Response("Not Found", status=404)
-    return send_from_directory(BASE_DIR, filename)
-
-
 @app.route("/healthz", methods=["GET"])
 def healthz():
     return "ok"
@@ -196,9 +182,6 @@ def healthz():
 @app.route("/", methods=["GET"])
 def do_get():
     action = request.args.get("action")
-    if action is None:
-        # 無 action 的 GET 視為瀏覽首頁，由同一服務提供前端
-        return send_from_directory(BASE_DIR, "index.html")
     result = {}
     try:
         if action == "getStaffNames":

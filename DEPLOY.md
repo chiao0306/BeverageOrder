@@ -2,7 +2,7 @@
 
 ## 架構與注意事項
 
-- 前端靜態檔與 Flask 後端由同一個 Cloud Run 服務提供（同源，`api-config.js` 使用 `window.location.origin`），以服務帳戶存取 Cloud Firestore。僅白名單內的前端檔案可被下載。
+- 靜態前端部署於 GitHub Pages；Cloud Run 的 Flask 後端以服務帳戶存取 Cloud Firestore。
 - Firestore 儲存後台帳號、授權、人員名單、扣打、每日店家與訂單。執行時不再讀寫試算表；原試算表及舊訂單保留供查閱。
 - 所有訂購同事依然不必登入，選擇姓名即可訂購；因此仍可能冒用他人姓名。
 - 後台初始及重設密碼等於工號，容易被猜到。請透過可信方式通知本人儘速修改，勿在公開管道散布工號。
@@ -53,10 +53,10 @@ $env:OLD_API_URL = "<原 Cloud Run HTTPS 網址>"
 gcloud meta list-files-for-upload
 gcloud run deploy beverageorder --source . --region asia-east1 --project <PROJECT_ID> `
   --no-traffic --tag firestore-preview `
-  --update-env-vars "ALLOWED_ORIGIN=<Cloud Run 服務網址>"
+  --update-env-vars "ALLOWED_ORIGIN=https://chiao0306.github.io"
 ```
 
-新修訂版先不接正式流量；使用輸出的預覽網址檢查 `/healthz`、管理登入與 Firestore 讀取。前端與 API 同源，`ALLOWED_ORIGIN` 設為服務網址即可；不要使用 `*`。直接開啟服務根網址即為訂購首頁。
+新修訂版先不接正式流量；使用輸出的預覽網址檢查 `/healthz`、管理登入與 Firestore 讀取。正式環境應依實際 GitHub Pages origin 調整 `ALLOWED_ORIGIN`；不要使用 `*`。若前端 API 網址不同，修改 `api-config.js`。
 
 **新舊前後端的 API 資料格式不同，不能只切換其中一端。** 正式上線前應安排短暫維護時段，先停止舊系統訂購並確認舊訂單已妥善保存；部署包含所有新前端檔案的 GitHub Pages 版本，並將 Cloud Run 流量切至已驗證的新修訂版。完成後確認登入、未開店狀態、姓名與扣打，再開放訂購。切換期間新舊版本可能短暫不相容，應通知使用者不要送單。
 
